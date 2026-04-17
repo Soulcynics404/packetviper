@@ -1,8 +1,7 @@
-//! Packet capture engine module
-
 pub mod engine;
+pub mod stream;
+pub mod plugins;
 
-/// List all available network interfaces
 pub fn list_interfaces() -> Vec<NetworkInterface> {
     pnet_datalink::interfaces()
         .into_iter()
@@ -18,7 +17,6 @@ pub fn list_interfaces() -> Vec<NetworkInterface> {
         .collect()
 }
 
-/// Simplified network interface info
 #[derive(Debug, Clone)]
 pub struct NetworkInterface {
     pub name: String,
@@ -34,14 +32,9 @@ impl std::fmt::Display for NetworkInterface {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let status = if self.is_up { "UP" } else { "DOWN" };
         let loopback = if self.is_loopback { " (loopback)" } else { "" };
-        write!(
-            f,
-            "{} [{}{}] MAC:{} IPs:[{}]",
-            self.name,
-            status,
-            loopback,
+        write!(f, "{} [{}{}] MAC:{} IPs:[{}]",
+            self.name, status, loopback,
             self.mac.as_deref().unwrap_or("N/A"),
-            self.ips.join(", ")
-        )
+            self.ips.join(", "))
     }
 }

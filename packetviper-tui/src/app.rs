@@ -1,3 +1,4 @@
+use packetviper_core::capture::stream::StreamTracker;
 use packetviper_core::packets::CapturedPacket;
 use packetviper_core::filters::engine::FilterEngine;
 use packetviper_core::stats::bandwidth::BandwidthMonitor;
@@ -70,6 +71,7 @@ pub struct App {
     pub filter_engine: FilterEngine,
     pub bandwidth_monitor: BandwidthMonitor,
     pub connection_tracker: ConnectionTracker,
+    pub stream_tracker: StreamTracker,
     pub threat_detector: ThreatDetector,
     pub geoip: GeoIpLookup,
     pub interface: String,
@@ -112,6 +114,7 @@ impl App {
             filter_engine: FilterEngine::new(),
             bandwidth_monitor: BandwidthMonitor::new(),
             connection_tracker: ConnectionTracker::new(),
+            stream_tracker: StreamTracker::new(),
             threat_detector: ThreatDetector::new(),
             geoip,
             interface: interface.to_string(),
@@ -177,6 +180,21 @@ impl App {
         self.bandwidth_monitor.record_packet(&packet);
         self.threat_detector.analyze(&packet);
         self.connection_tracker.track_packet(&packet);
+                // Track TCP streams
+        if let Some(ref transport) = packet.layers.transport {
+            if let packetviper_core::packets::transport::TransportLayerInfo::Tcp(ref tcp) = transport {
+                let src_ip = Self::extract_ip(&packet.source);
+                let dst_ip = Self::extract_ip(&packet.destination);
+                self.stream_tracker.process_tcp_packet(
+                    &src_ip, tcp.src_port,
+                    &dst_ip, tcp.dst_port,
+                    tcp.flags.syn, tcp.flags.ack, tcp.flags.fin, tcp.flags.rst,
+                    &[], // We don't have raw payload here, but stream tracking still works for state
+                    packet.timestamp,
+                    &packet.protocol,
+                );
+            }
+        }
 
         self.packets.push(packet);
         let idx = self.packets.len() - 1;
@@ -306,4 +324,17 @@ impl App {
     pub fn toggle_detail(&mut self) { self.show_detail = !self.show_detail; }
     pub fn packet_count(&self) -> usize { self.packets.len() }
     pub fn filtered_count(&self) -> usize { self.filtered_indices.len() }
+
+    fn extract_ip(addr: &str) -> String {
+        if let Some(last_colon) = addr.rfind(':') {
+            let after = &addr[last_colon + 1..];
+            if after.parse::<u16>().is_ok() {
+                let colon_count = addr.matches(':').count();
+                if colon_count == 1 {
+                    return addr[..last_colon].to_string();
+                }
+            }
+        }
+        addr.to_string()
+    }
 }

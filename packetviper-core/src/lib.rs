@@ -7,6 +7,8 @@ pub mod export;
 
 pub mod prelude {
     pub use crate::capture::engine::CaptureEngine;
+    pub use crate::capture::stream::StreamTracker;
+    pub use crate::capture::plugins::PluginRegistry;
     pub use crate::packets::{
         CapturedPacket, PacketDirection, LayerInfo,
         link::LinkLayerInfo,

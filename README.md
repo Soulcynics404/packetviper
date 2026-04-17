@@ -98,7 +98,9 @@
 | **Link (L2)** | Ethernet, ARP | MAC addresses, EtherType, ARP request/reply parsing |
 | **Network (L3)** | IPv4, IPv6, ICMP, ICMPv6 | IP addresses, TTL/Hop Limit, flags, DSCP, identification |
 | **Transport (L4)** | TCP, UDP | Ports, sequence/ack numbers, all TCP flags (SYN/ACK/FIN/RST/PSH/URG/ECE/CWR), window size |
-| **Application (L7)** | HTTP, DNS, TLS, SSH, DHCP | HTTP methods/status, DNS queries/answers, TLS version + SNI extraction, SSH version detection |
+| **Application (L7)** | HTTP, DNS, TLS, SSH, DHCP, FTP, SMTP, MQTT | HTTP methods/status, DNS queries/answers, TLS version + SNI extraction, SSH version detection |
+
+
 
 ### 🛡️ Threat Detection Engine
 

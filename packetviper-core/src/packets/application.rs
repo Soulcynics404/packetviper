@@ -9,6 +9,9 @@ pub enum AppLayerInfo {
     Tls(TlsInfo),
     Ssh(SshInfo),
     Dhcp(DhcpInfo),
+    Ftp(FtpInfo),
+    Smtp(SmtpInfo),
+    Mqtt(MqttInfo),
     Unknown { port: u16 },
 }
 
@@ -54,7 +57,7 @@ pub struct TlsInfo {
     pub version: String,
     pub content_type: String,
     pub handshake_type: Option<String>,
-    pub sni: Option<String>, // Server Name Indication
+    pub sni: Option<String>,
     pub cipher_suite: Option<String>,
 }
 
@@ -71,6 +74,36 @@ pub struct DhcpInfo {
     pub your_ip: Option<String>,
     pub server_ip: Option<String>,
     pub client_mac: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FtpInfo {
+    pub command: Option<String>,
+    pub args: Option<String>,
+    pub response_code: Option<u16>,
+    pub response_message: Option<String>,
+    pub is_response: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SmtpInfo {
+    pub command: Option<String>,
+    pub args: Option<String>,
+    pub response_code: Option<u16>,
+    pub response_message: Option<String>,
+    pub is_response: bool,
+    pub from: Option<String>,
+    pub to: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MqttInfo {
+    pub message_type: String,
+    pub message_type_id: u8,
+    pub flags: u8,
+    pub remaining_length: u32,
+    pub topic: Option<String>,
+    pub client_id: Option<String>,
 }
 
 impl std::fmt::Display for AppLayerInfo {
@@ -94,18 +127,42 @@ impl std::fmt::Display for AppLayerInfo {
                 }
             }
             AppLayerInfo::Tls(tls) => {
-                write!(f, "TLS {} {}", tls.version,
-                    tls.sni.as_deref().unwrap_or(""))
+                write!(f, "TLS {} {}", tls.version, tls.sni.as_deref().unwrap_or(""))
             }
             AppLayerInfo::Ssh(ssh) => {
                 write!(f, "SSH {}", ssh.version.as_deref().unwrap_or(&ssh.message_type))
             }
-            AppLayerInfo::Dhcp(dhcp) => {
-                write!(f, "DHCP {}", dhcp.message_type)
+            AppLayerInfo::Dhcp(dhcp) => write!(f, "DHCP {}", dhcp.message_type),
+            AppLayerInfo::Ftp(ftp) => {
+                if ftp.is_response {
+                    write!(f, "FTP {} {}", 
+                        ftp.response_code.unwrap_or(0),
+                        ftp.response_message.as_deref().unwrap_or(""))
+                } else {
+                    write!(f, "FTP {} {}", 
+                        ftp.command.as_deref().unwrap_or(""),
+                        ftp.args.as_deref().unwrap_or(""))
+                }
             }
-            AppLayerInfo::Unknown { port } => {
-                write!(f, "Unknown (port: {})", port)
+            AppLayerInfo::Smtp(smtp) => {
+                if smtp.is_response {
+                    write!(f, "SMTP {} {}", 
+                        smtp.response_code.unwrap_or(0),
+                        smtp.response_message.as_deref().unwrap_or(""))
+                } else {
+                    write!(f, "SMTP {} {}", 
+                        smtp.command.as_deref().unwrap_or(""),
+                        smtp.args.as_deref().unwrap_or(""))
+                }
             }
+            AppLayerInfo::Mqtt(mqtt) => {
+                if let Some(topic) = &mqtt.topic {
+                    write!(f, "MQTT {} topic:{}", mqtt.message_type, topic)
+                } else {
+                    write!(f, "MQTT {}", mqtt.message_type)
+                }
+            }
+            AppLayerInfo::Unknown { port } => write!(f, "Unknown (port: {})", port),
         }
     }
 }

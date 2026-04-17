@@ -255,7 +255,7 @@ fn tokenize(input: &str) -> Result<Vec<Token>, String> {
                 "or" => tokens.push(Token::Or),
                 "not" => tokens.push(Token::Not),
                 "tcp" | "udp" | "icmp" | "icmpv6" | "arp" | "http" | "dns" | "tls"
-                | "ssh" | "dhcp" | "ipv4" | "ipv6" | "igmp" => {
+                | "ssh" | "dhcp" | "ipv4" | "ipv6" | "igmp" | "ftp" | "smtp" | "mqtt" => {
                     tokens.push(Token::Protocol(word));
                 }
                 "ip" | "src" | "dst" | "port" | "sport" | "dport" | "len" | "length"

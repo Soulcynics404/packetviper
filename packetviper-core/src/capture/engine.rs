@@ -461,7 +461,7 @@ impl CaptureEngine {
     }
 
     /// Try to detect the application-layer protocol based on port numbers and payload
-    fn detect_app_protocol(
+        fn detect_app_protocol(
         src_port: u16,
         dst_port: u16,
         payload: &[u8],
@@ -475,12 +475,12 @@ impl CaptureEngine {
             return Self::parse_dns(payload);
         }
 
-        // HTTP (port 80, 8080, or starts with HTTP method)
+        // HTTP (port 80, 8080)
         if src_port == 80 || dst_port == 80 || src_port == 8080 || dst_port == 8080 {
             return Self::parse_http(payload);
         }
 
-        // TLS (port 443 or starts with TLS record)
+        // TLS (port 443)
         if src_port == 443 || dst_port == 443 {
             return Self::parse_tls(payload);
         }
@@ -501,7 +501,14 @@ impl CaptureEngine {
             }));
         }
 
-        None
+        // Use plugin system for FTP, SMTP, MQTT
+        use crate::capture::plugins::PluginRegistry;
+        // Create a thread-local registry to avoid recreating each time
+        thread_local! {
+            static REGISTRY: PluginRegistry = PluginRegistry::new();
+        }
+
+        REGISTRY.with(|registry| registry.try_parse(src_port, dst_port, payload))
     }
 
     /// Basic HTTP parser
