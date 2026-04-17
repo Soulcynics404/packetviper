@@ -3,7 +3,7 @@
 ## Overview
 
 PacketViper uses a **multi-crate Rust workspace**:
-
+```
 ┌──────────────────────────────────────────────────┐
 │ packetviper-tui                                  │
 │ (Terminal UI — Ratatui + Crossterm)              │
@@ -36,7 +36,7 @@ PacketViper uses a **multi-crate Rust workspace**:
 │ Linux Kernel      │
 │ (Network Stack)   │
 └───────────────────┘
-
+```
 
 ## Data Flow
 
