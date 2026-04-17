@@ -205,21 +205,21 @@ cd packetviper
 cargo build --release
 ```
 
-### Run
+## Run
 
-# List available network interfaces
+### List available network interfaces
 
 ```
 sudo ./target/release/packetviper
 ```
-# Capture on a specific interface
+### Capture on a specific interface
 
 ```
 sudo ./target/release/packetviper wlan0    # WiFi
 sudo ./target/release/packetviper eth0     # Ethernet
 ```
 
-# Alternative: set capabilities to avoid sudo
+### Alternative: set capabilities to avoid sudo
 ```
 sudo setcap cap_net_raw,cap_net_admin=eip ./target/release/packetviper
 ./target/release/packetviper wlan0
