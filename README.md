@@ -240,20 +240,20 @@ sudo setcap cap_net_raw,cap_net_admin=eip ./target/release/packetviper
 ```
 
 ### 📦 Dependencies
-**Crate	              Version                	Purpose**
-**pnet	               0.35	              Raw packet capture and protocol parsing**
-**pnet_datalink	       0.35	              Network interface enumeration**
-**ratatui	           0.28	              Terminal UI framework**
-**crossterm	           0.28	              Terminal manipulation (raw mode, events)**
-**crossbeam-channel	   0.5	              Lock-free multi-producer channels**
-**tokio	               1.0	              Async runtime**
-**chrono	           0.4	              Timestamp handling**
-**serde / serde_json   1.0	              Serialization for JSON export**
-**csv	               1.3	              CSV export**
-**thiserror	           1.0	              Error handling**
-**log / env_logger	   0.4 / 0.11         Logging framework**
-**maxminddb	           0.24	              GeoIP database reader (planned)**
-**dns-lookup	       2.0	              DNS resolution utilities**
+- **Crate	              Version                	Purpose**
+- **pnet	               0.35	              Raw packet capture and protocol parsing**
+- **pnet_datalink	       0.35	              Network interface enumeration**
+- **ratatui	           0.28	              Terminal UI framework**
+- **crossterm	           0.28	              Terminal manipulation (raw mode, events)**
+- **crossbeam-channel	   0.5	              Lock-free multi-producer channels**
+- **tokio	               1.0	              Async runtime**
+- **chrono	           0.4	              Timestamp handling**
+- **serde / serde_json   1.0	              Serialization for JSON export**
+- **csv	               1.3	              CSV export**
+- **thiserror	           1.0	              Error handling**
+- **log / env_logger	   0.4 / 0.11         Logging framework**
+- **maxminddb	           0.24	              GeoIP database reader (planned)**
+- **dns-lookup	       2.0	              DNS resolution utilities**
 
 ---
 
