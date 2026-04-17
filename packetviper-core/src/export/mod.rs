@@ -1,6 +1,7 @@
 pub mod json;
 pub mod csv;
 pub mod pcap;
+pub mod session;
 
 use crate::packets::CapturedPacket;
 use thiserror::Error;
@@ -13,7 +14,6 @@ pub enum ExportError {
     Serialization(String),
 }
 
-/// Common trait for all exporters
 pub trait Exporter {
     fn export(&self, packets: &[CapturedPacket], path: &str) -> Result<(), ExportError>;
 }

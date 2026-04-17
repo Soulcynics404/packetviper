@@ -5,6 +5,9 @@ use packetviper_core::stats::connections::ConnectionTracker;
 use packetviper_core::threat::detector::ThreatDetector;
 use packetviper_core::threat::geoip::GeoIpLookup;
 use packetviper_core::export::{Exporter, json::JsonExporter, csv::CsvExporter, pcap::PcapExporter};
+use packetviper_core::export::session::SessionManager;
+
+use crate::theme::{Theme, ThemeName};
 
 use std::collections::HashSet;
 
@@ -79,11 +82,11 @@ pub struct App {
     pub last_export_path: Option<String>,
     pub bookmarked_packets: HashSet<u64>,
     pub show_bookmarks_only: bool,
+    pub theme: Theme,
 }
 
 impl App {
     pub fn new(interface: &str) -> Self {
-        // Try multiple paths for GeoIP database
         let geoip_paths = [
             "data/GeoLite2-City.mmdb",
             "/usr/share/GeoIP/GeoLite2-City.mmdb",
@@ -114,13 +117,58 @@ impl App {
             interface: interface.to_string(),
             capturing: false,
             total_bytes: 0,
-            status_message: String::from("Press 'c' to start capture, 'q' to quit"),
+            status_message: String::from("Press 'c' to start, 'q' quit, 't' theme"),
             filter_input: String::new(),
             filter_input_active: false,
             auto_scroll: true,
             last_export_path: None,
             bookmarked_packets: HashSet::new(),
             show_bookmarks_only: false,
+            theme: Theme::from_name(ThemeName::Cyberpunk),
+        }
+    }
+
+    pub fn cycle_theme(&mut self) {
+        let next = self.theme.name.next();
+        self.theme = Theme::from_name(next);
+        self.status_message = format!("Theme: {}", self.theme.name.name());
+    }
+
+    pub fn save_session(&mut self) {
+        let path = format!(
+            "packetviper_session_{}.json",
+            chrono::Local::now().format("%Y%m%d_%H%M%S")
+        );
+        let bookmarks: Vec<u64> = self.bookmarked_packets.iter().copied().collect();
+        match SessionManager::save(&self.packets, &bookmarks, &path) {
+            Ok(p) => {
+                self.status_message = format!("Session saved: {} ({} packets)", p, self.packets.len());
+                self.last_export_path = Some(path);
+            }
+            Err(e) => self.status_message = format!("Save failed: {}", e),
+        }
+    }
+
+    pub fn load_session(&mut self, path: &str) {
+        match SessionManager::load(path) {
+            Ok(session) => {
+                self.packets = session.packets;
+                self.bookmarked_packets = session.bookmarks.into_iter().collect();
+                self.total_bytes = self.packets.iter().map(|p| p.length as u64).sum();
+                self.rebuild_filtered_indices();
+
+                for pkt in &self.packets {
+                    self.bandwidth_monitor.record_packet(pkt);
+                    self.connection_tracker.track_packet(pkt);
+                }
+
+                self.status_message = format!(
+                    "Session loaded: {} packets, {} bookmarks",
+                    self.packets.len(),
+                    self.bookmarked_packets.len()
+                );
+            }
+            Err(e) => self.status_message = format!("Load failed: {}", e),
         }
     }
 
@@ -156,7 +204,7 @@ impl App {
         } else {
             match self.filter_engine.set_filter(&self.filter_input) {
                 Ok(()) => {
-                    self.status_message = format!("Filter applied: {}", self.filter_input);
+                    self.status_message = format!("Filter: {}", self.filter_input);
                 }
                 Err(e) => {
                     self.status_message = format!("Filter error: {}", e);
@@ -179,9 +227,7 @@ impl App {
         self.filtered_indices.clear();
         for (idx, pkt) in self.packets.iter().enumerate() {
             if self.filter_engine.matches(pkt) {
-                if !self.show_bookmarks_only
-                    || self.bookmarked_packets.contains(&pkt.id)
-                {
+                if !self.show_bookmarks_only || self.bookmarked_packets.contains(&pkt.id) {
                     self.filtered_indices.push(idx);
                 }
             }
@@ -194,10 +240,10 @@ impl App {
             let id = pkt.id;
             if self.bookmarked_packets.contains(&id) {
                 self.bookmarked_packets.remove(&id);
-                self.status_message = format!("Bookmark removed: packet #{}", id);
+                self.status_message = format!("Unbookmarked #{}", id);
             } else {
                 self.bookmarked_packets.insert(id);
-                self.status_message = format!("Bookmarked: packet #{}", id);
+                self.status_message = format!("Bookmarked #{}", id);
             }
         }
     }
@@ -206,12 +252,9 @@ impl App {
         self.show_bookmarks_only = !self.show_bookmarks_only;
         self.rebuild_filtered_indices();
         if self.show_bookmarks_only {
-            self.status_message = format!(
-                "Showing {} bookmarked packets",
-                self.bookmarked_packets.len()
-            );
+            self.status_message = format!("Bookmarks: {}", self.bookmarked_packets.len());
         } else {
-            self.status_message = "Showing all packets".to_string();
+            self.status_message = "Showing all".to_string();
         }
     }
 
@@ -227,91 +270,40 @@ impl App {
     }
 
     pub fn export_json(&mut self) {
-        let path = format!(
-            "packetviper_export_{}.json",
-            chrono::Local::now().format("%Y%m%d_%H%M%S")
-        );
-        let exporter = JsonExporter;
-        match exporter.export(&self.packets, &path) {
-            Ok(()) => {
-                self.status_message =
-                    format!("Exported {} packets to {}", self.packets.len(), path);
-                self.last_export_path = Some(path);
-            }
+        let path = format!("packetviper_export_{}.json", chrono::Local::now().format("%Y%m%d_%H%M%S"));
+        match JsonExporter.export(&self.packets, &path) {
+            Ok(()) => { self.status_message = format!("Exported JSON: {}", path); self.last_export_path = Some(path); }
             Err(e) => self.status_message = format!("Export failed: {}", e),
         }
     }
 
     pub fn export_csv(&mut self) {
-        let path = format!(
-            "packetviper_export_{}.csv",
-            chrono::Local::now().format("%Y%m%d_%H%M%S")
-        );
-        let exporter = CsvExporter;
-        match exporter.export(&self.packets, &path) {
-            Ok(()) => {
-                self.status_message =
-                    format!("Exported {} packets to {}", self.packets.len(), path);
-                self.last_export_path = Some(path);
-            }
+        let path = format!("packetviper_export_{}.csv", chrono::Local::now().format("%Y%m%d_%H%M%S"));
+        match CsvExporter.export(&self.packets, &path) {
+            Ok(()) => { self.status_message = format!("Exported CSV: {}", path); self.last_export_path = Some(path); }
             Err(e) => self.status_message = format!("Export failed: {}", e),
         }
     }
 
     pub fn export_pcap(&mut self) {
-        let path = format!(
-            "packetviper_export_{}.pcap",
-            chrono::Local::now().format("%Y%m%d_%H%M%S")
-        );
-        let exporter = PcapExporter;
-        match exporter.export(&self.packets, &path) {
-            Ok(()) => {
-                self.status_message =
-                    format!("Exported {} packets to {}", self.packets.len(), path);
-                self.last_export_path = Some(path);
-            }
+        let path = format!("packetviper_export_{}.pcap", chrono::Local::now().format("%Y%m%d_%H%M%S"));
+        match PcapExporter.export(&self.packets, &path) {
+            Ok(()) => { self.status_message = format!("Exported PCAP: {}", path); self.last_export_path = Some(path); }
             Err(e) => self.status_message = format!("Export failed: {}", e),
         }
     }
 
     pub fn selected_packet(&self) -> Option<&CapturedPacket> {
-        self.filtered_indices
-            .get(self.selected_index)
-            .and_then(|&idx| self.packets.get(idx))
+        self.filtered_indices.get(self.selected_index).and_then(|&idx| self.packets.get(idx))
     }
 
-    pub fn scroll_up(&mut self) {
-        self.auto_scroll = false;
-        if self.selected_index > 0 {
-            self.selected_index -= 1;
-        }
-    }
-
+    pub fn scroll_up(&mut self) { self.auto_scroll = false; if self.selected_index > 0 { self.selected_index -= 1; } }
     pub fn scroll_down(&mut self) {
-        if self.selected_index + 1 < self.filtered_indices.len() {
-            self.selected_index += 1;
-        }
-        if self.selected_index == self.filtered_indices.len().saturating_sub(1) {
-            self.auto_scroll = true;
-        }
+        if self.selected_index + 1 < self.filtered_indices.len() { self.selected_index += 1; }
+        if self.selected_index == self.filtered_indices.len().saturating_sub(1) { self.auto_scroll = true; }
     }
-
-    pub fn scroll_to_bottom(&mut self) {
-        if !self.filtered_indices.is_empty() {
-            self.selected_index = self.filtered_indices.len() - 1;
-            self.auto_scroll = true;
-        }
-    }
-
-    pub fn toggle_detail(&mut self) {
-        self.show_detail = !self.show_detail;
-    }
-
-    pub fn packet_count(&self) -> usize {
-        self.packets.len()
-    }
-
-    pub fn filtered_count(&self) -> usize {
-        self.filtered_indices.len()
-    }
+    pub fn scroll_to_bottom(&mut self) { if !self.filtered_indices.is_empty() { self.selected_index = self.filtered_indices.len() - 1; self.auto_scroll = true; } }
+    pub fn toggle_detail(&mut self) { self.show_detail = !self.show_detail; }
+    pub fn packet_count(&self) -> usize { self.packets.len() }
+    pub fn filtered_count(&self) -> usize { self.filtered_indices.len() }
 }

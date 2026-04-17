@@ -1,3 +1,4 @@
+mod theme;
 mod app;
 mod events;
 mod handler;

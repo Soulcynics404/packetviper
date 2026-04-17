@@ -7,19 +7,21 @@ pub mod help;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Tabs, Paragraph};
 
 use crate::app::{ActiveTab, App};
 
 pub fn render(f: &mut Frame, app: &App) {
+    let t = &app.theme;
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Tab bar
-            Constraint::Min(10),   // Main content
-            Constraint::Length(3), // Status bar
+            Constraint::Length(3),
+            Constraint::Min(10),
+            Constraint::Length(3),
         ])
         .split(f.area());
 
@@ -38,111 +40,78 @@ pub fn render(f: &mut Frame, app: &App) {
 }
 
 fn render_tabs(f: &mut Frame, app: &App, area: Rect) {
+    let t = &app.theme;
     let threat_count = app.threat_detector.critical_count();
-    let threat_badge = if threat_count > 0 {
-        format!(" ⚠️ {}", threat_count)
-    } else {
-        String::new()
-    };
+    let threat_badge = if threat_count > 0 { format!(" ⚠ {}", threat_count) } else { String::new() };
 
     let titles: Vec<Line> = ActiveTab::titles()
         .iter()
         .enumerate()
-        .map(|(i, t)| {
-            let label = if i == 4 {
-                format!("{}{}", t, threat_badge)
-            } else {
-                t.to_string()
-            };
-            Line::from(Span::styled(label, Style::default().fg(Color::White)))
+        .map(|(i, title)| {
+            let label = if i == 4 { format!("{}{}", title, threat_badge) } else { title.to_string() };
+            Line::from(Span::styled(label, Style::default().fg(t.text)))
         })
         .collect();
 
     let tabs = Tabs::new(titles)
         .block(
             Block::default()
-                .title(" PacketViper 🐍 ")
+                .title(format!(" PacketViper 🐍 [{}] ", t.name.name()))
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Green)),
+                .border_style(Style::default().fg(t.border)),
         )
         .select(app.active_tab.index())
-        .style(Style::default().fg(Color::DarkGray))
-        .highlight_style(
-            Style::default()
-                .fg(Color::Green)
-                .add_modifier(Modifier::BOLD),
-        );
+        .style(Style::default().fg(t.text_dim))
+        .highlight_style(Style::default().fg(t.border_highlight).add_modifier(Modifier::BOLD));
 
     f.render_widget(tabs, area);
 }
 
 fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
+    let t = &app.theme;
+
     let capture_status = if app.capturing {
-        Span::styled(
-            " ● CAPTURING ",
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-        )
+        Span::styled(" ● LIVE ", Style::default().fg(t.capture_active).add_modifier(Modifier::BOLD))
     } else {
-        Span::styled(" ○ STOPPED ", Style::default().fg(Color::DarkGray))
+        Span::styled(" ○ STOP ", Style::default().fg(t.capture_stopped))
     };
 
     let filter_info = if !app.filter_engine.expression().is_empty() {
-        Span::styled(
-            format!("Filter: {} ", app.filter_engine.expression()),
-            Style::default().fg(Color::Yellow),
-        )
+        Span::styled(format!("F:{} ", app.filter_engine.expression()), Style::default().fg(t.accent3))
     } else if app.filter_input_active {
-        Span::styled(
-            format!("/{}", app.filter_input),
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-        )
+        Span::styled(format!("/{}", app.filter_input), Style::default().fg(t.accent3).add_modifier(Modifier::BOLD))
+    } else {
+        Span::raw("")
+    };
+
+    let bm_info = if app.show_bookmarks_only {
+        Span::styled(format!("★{} ", app.bookmarked_packets.len()), Style::default().fg(t.bookmark))
     } else {
         Span::raw("")
     };
 
     let info = Line::from(vec![
         capture_status,
-        Span::raw(" | "),
-        Span::styled(
-            format!("Pkts: {} ", app.packet_count()),
-            Style::default().fg(Color::Cyan),
-        ),
         Span::raw("| "),
-        Span::styled(
-            format!("Shown: {} ", app.filtered_count()),
-            Style::default().fg(Color::Yellow),
-        ),
-        Span::raw("| "),
-        Span::styled(
-            format!("{} ", format_bytes(app.total_bytes)),
-            Style::default().fg(Color::Magenta),
-        ),
+        Span::styled(format!("P:{} ", app.packet_count()), Style::default().fg(t.accent1)),
+        Span::styled(format!("S:{} ", app.filtered_count()), Style::default().fg(t.accent3)),
+        Span::styled(format!("{} ", format_bytes(app.total_bytes)), Style::default().fg(t.accent2)),
         Span::raw("| "),
         filter_info,
-        Span::raw("| "),
-        Span::styled(
-            app.status_message.clone(),
-            Style::default().fg(Color::White),
-        ),
+        bm_info,
+        Span::styled(app.status_message.clone(), Style::default().fg(t.text)),
     ]);
 
     let status = Paragraph::new(info).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::DarkGray)),
+        Block::default().borders(Borders::ALL).border_style(Style::default().fg(t.text_dim)),
     );
 
     f.render_widget(status, area);
 }
 
 pub fn format_bytes(bytes: u64) -> String {
-    if bytes < 1024 {
-        format!("{} B", bytes)
-    } else if bytes < 1024 * 1024 {
-        format!("{:.1} KB", bytes as f64 / 1024.0)
-    } else if bytes < 1024 * 1024 * 1024 {
-        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
-    } else {
-        format!("{:.2} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
-    }
+    if bytes < 1024 { format!("{} B", bytes) }
+    else if bytes < 1024 * 1024 { format!("{:.1} KB", bytes as f64 / 1024.0) }
+    else if bytes < 1024 * 1024 * 1024 { format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0)) }
+    else { format!("{:.2} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0)) }
 }
