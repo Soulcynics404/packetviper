@@ -192,3 +192,133 @@ contains "google"                        # Text search in packet summary
 ```bash
 sudo apt update
 sudo apt install -y build-essential libpcap-dev pkg-config
+
+## Install Rust (if not already installed)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source ~/.cargo/env
+
+## Build from Source
+git clone https://github.com/Soulcynics404/packetviper.git
+cd packetviper
+cargo build --release
+
+###Run
+
+# List available network interfaces
+sudo ./target/release/packetviper
+
+# Capture on a specific interface
+sudo ./target/release/packetviper wlan0    # WiFi
+sudo ./target/release/packetviper eth0     # Ethernet
+
+# Alternative: set capabilities to avoid sudo
+sudo setcap cap_net_raw,cap_net_admin=eip ./target/release/packetviper
+./target/release/packetviper wlan0
+```
+
+### Data Flow
+
+┌──────────────────────────────────────────────────┐
+│              Terminal UI (Ratatui)               │
+│  ┌──────────┐ ┌──────┐ ┌───────┐ ┌──────────┐    │
+│  │Dashboard │ │Stats │ │Filter │ │ Threats  │    │
+│  └─────┬────┘ └──┬───┘ └──┬────┘ └────┬─────┘    │
+│        └─────────┼────────┼────────────┘         │
+│  ┌───────────────▼──────────────────────────┐    │
+│  │  Main Loop: Drain → Filter → Stats →     │    │
+│  │  Threats → Render (50ms tick)            │    │
+│  └───────────────┬──────────────────────────┘    │
+└──────────────────┼───────────────────────────────┘
+                   │ crossbeam-channel (lock-free)
+┌──────────────────▼───────────────────────────────┐
+│  Capture Thread (pnet raw socket, promiscuous)   │
+│  Parse: Ethernet → IP → TCP/UDP → App Layer      │
+└──────────────────┬───────────────────────────────┘
+           ┌───────▼────────┐
+           │  Linux Kernel  │
+           └────────────────┘
+
+### 📦 Dependencies
+Crate	           Version                	Purpose
+pnet	            0.35	        Raw packet capture and protocol parsing
+pnet_datalink	    0.35	        Network interface enumeration
+ratatui	            0.28	        Terminal UI framework
+crossterm	        0.28	        Terminal manipulation (raw mode, events)
+crossbeam-channel	0.5	            Lock-free multi-producer channels
+tokio	            1.0	            Async runtime
+chrono	            0.4	            Timestamp handling
+serde / serde_json	1.0	            Serialization for JSON export
+csv	                1.3	            CSV export
+thiserror	        1.0	            Error handling
+log / env_logger	0.4 / 0.11     	Logging framework
+maxminddb	        0.24	        GeoIP database reader (planned)
+dns-lookup	        2.0	            DNS resolution utilities
+
+---
+
+## 🗺️ Roadmap
+
+- [x] Phase 1: Core capture engine + basic TUI
+- [x] Phase 2: All 6 UI tabs, filter DSL, stats, threat detection, export
+- [x] Phase 3: GitHub deployment + documentation
+- [ ] Phase 4: GeoIP integration
+- [ ] Phase 5: Packet bookmarking + session save/restore
+- [ ] Phase 6: Color themes + UI customization
+- [ ] Phase 7: Plugin system for custom protocol parsers
+- [ ] Phase 8: TCP stream reassembly
+- [ ] Phase 9: More protocols (FTP, SMTP, MQTT, gRPC)
+- [ ] Phase 10: Performance benchmarks + optimization
+
+---
+
+## 🧪 Testing
+
+PacketViper has been tested in the following scenarios:
+
+| Test | Tool Used | Result |
+|------|-----------|--------|
+| ARP Spoofing Detection | `bettercap` | ✅ CRITICAL alert triggered |
+| Normal Traffic Capture | Web browsing | ✅ HTTP, DNS, TLS, TCP captured |
+| High Traffic Rate | `bettercap` flooding | ✅ HIGH alerts triggered |
+| DNS Tunneling Detection | Long DNS queries | ✅ MEDIUM alerts triggered |
+| Filter DSL | Various expressions | ✅ Protocol, IP, port, compound filters work |
+| Export JSON/CSV/PCAP | Built-in export | ✅ Files generated correctly |
+
+---
+
+## 📄 Documentation
+
+| Document | Description |
+|----------|-------------|
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, data flow, thread model |
+| [FEATURES.md](docs/FEATURES.md) | Complete feature list with details |
+| [PROJECT_REPORT.md](docs/PROJECT_REPORT.md) | Academic report: threats, limitations, audience, dependencies |
+| [CONTRIBUTING.md](docs/CONTRIBUTING.md) | How to contribute |
+
+---
+
+## 🤝 Contributing
+
+See [CONTRIBUTING.md](docs/CONTRIBUTING.md) for guidelines.
+
+---
+
+## 📝 License
+
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file.
+
+---
+
+## 👤 Author
+
+**Harsshh** — [@Soulcynics404](https://github.com/Soulcynics404)
+
+---
+
+<div align="center">
+
+*Built with ❤️ and Rust for the cybersecurity community*
+
+**⭐ Star this repo if you find it useful!**
+
+</div>
