@@ -1,0 +1,14 @@
+[workspace]
+members = [
+    "packetviper-core",
+    "packetviper-tui",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Harsshh <your_email@example.com>"]
+license = "MIT"
+description = "A blazing-fast TUI network traffic analyzer with threat detection"
+repository = "https://github.com/Soulcynics404/packetviper"

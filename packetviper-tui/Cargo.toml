@@ -1,0 +1,21 @@
+[package]
+name = "packetviper-tui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "TUI frontend for PacketViper network analyzer"
+
+[[bin]]
+name = "packetviper"
+path = "src/main.rs"
+
+[dependencies]
+packetviper-core = { path = "../packetviper-core" }
+ratatui = "0.28"
+crossterm = "0.28"
+tokio = { version = "1", features = ["full"] }
+crossbeam-channel = "0.5"
+log = "0.4"
+env_logger = "0.11"
+chrono = "0.4"
