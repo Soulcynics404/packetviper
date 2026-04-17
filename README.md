@@ -119,7 +119,9 @@ A powerful domain-specific language for filtering traffic:
 ## Protocol filters
 
 tcp # All TCP packets (includes HTTP, TLS, SSH)
+
 udp # All UDP packets (includes DNS, DHCP)
+
 dns # DNS traffic only
 http || tls # HTTP or TLS
 arp # ARP packets
