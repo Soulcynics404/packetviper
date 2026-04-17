@@ -262,7 +262,7 @@ sudo setcap cap_net_raw,cap_net_admin=eip ./target/release/packetviper
 - [x] Phase 1: Core capture engine + basic TUI
 - [x] Phase 2: All 6 UI tabs, filter DSL, stats, threat detection, export
 - [x] Phase 3: GitHub deployment + documentation
-- [ ] Phase 4: GeoIP integration
+- [x] Phase 4: GeoIP integration
 - [ ] Phase 5: Packet bookmarking + session save/restore
 - [ ] Phase 6: Color themes + UI customization
 - [ ] Phase 7: Plugin system for custom protocol parsers
