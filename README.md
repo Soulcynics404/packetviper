@@ -111,41 +111,44 @@
 | **DDoS Indicators** | >500 packets in 10 seconds from single source | 🟠 HIGH |
 
 > ✅ **Tested:** Successfully detected ARP spoofing attacks performed with `bettercap` in a live lab environment.
-
 ### 🔧 Custom Filter DSL
 
 A powerful domain-specific language for filtering traffic:
 
-## Protocol filters
+#### Protocol Filters
 
-tcp # All TCP packets (includes HTTP, TLS, SSH)
+| Filter | Description |
+|--------|-------------|
+| `tcp` | All TCP packets (includes HTTP, TLS, SSH) |
+| `udp` | All UDP packets (includes DNS, DHCP) |
+| `dns` | DNS traffic only |
+| `http \|\| tls` | HTTP or TLS |
+| `arp` | ARP packets |
+| `!icmp` | Everything except ICMP |
 
-udp # All UDP packets (includes DNS, DHCP)
+#### Field Filters
 
-dns # DNS traffic only
-http || tls # HTTP or TLS
-arp # ARP packets
-!icmp # Everything except ICMP
+| Filter | Description |
+|--------|-------------|
+| `ip == 192.168.1.1` | Source IP match |
+| `dst == 8.8.8.8` | Destination IP |
+| `port == 443` | Source or destination port |
+| `sport == 80` | Source port only |
+| `dport == 53` | Destination port only |
+| `port 80..443` | Port range |
+| `len > 1000` | Packet size > 1000 bytes |
+| `ttl < 64` | TTL less than 64 |
+| `direction == in` | Incoming packets only |
 
-## Field filters
+#### Compound Filters
 
-ip == 192.168.1.1 # Source IP match
-dst == 8.8.8.8 # Destination IP
-port == 443 # Source or destination port
-sport == 80 # Source port only
-dport == 53 # Destination port only
-port 80..443 # Port range
-len > 1000 # Packet size > 1000 bytes
-ttl < 64 # TTL less than 64
-direction == in # Incoming packets only
+Combine multiple conditions using `&&` (AND) and `||` (OR):
 
-## Compound filters
-
-tcp && port == 443 # TCP on port 443
-(http || dns) && direction == out
-tcp && len > 500 && dst == 10.0.0.1
-contains "google" # Text search in packet summary
-
+```bash
+tcp && port == 443                       # TCP on port 443
+(http || dns) && direction == out        # Outbound HTTP or DNS
+tcp && len > 500 && dst == 10.0.0.1     # Large TCP to specific IP
+contains "google"                        # Text search in packet summary
 
 ### 📊 Live Statistics Dashboard
 - **Bandwidth sparkline graph** — real-time bytes/second visualization
