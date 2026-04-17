@@ -149,6 +149,7 @@ tcp && port == 443                       # TCP on port 443
 (http || dns) && direction == out        # Outbound HTTP or DNS
 tcp && len > 500 && dst == 10.0.0.1     # Large TCP to specific IP
 contains "google"                        # Text search in packet summary
+```
 
 ### 📊 Live Statistics Dashboard
 - **Bandwidth sparkline graph** — real-time bytes/second visualization
