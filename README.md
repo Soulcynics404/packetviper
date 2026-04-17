@@ -216,12 +216,15 @@ sudo ./target/release/packetviper
 
 ```
 sudo ./target/release/packetviper wlan0    # WiFi
+```
+```
 sudo ./target/release/packetviper eth0     # Ethernet
 ```
 
 ### Alternative: set capabilities to avoid sudo
 ```
 sudo setcap cap_net_raw,cap_net_admin=eip ./target/release/packetviper
+
 ./target/release/packetviper wlan0
 ```
 
