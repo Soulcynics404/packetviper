@@ -277,12 +277,12 @@ sudo setcap cap_net_raw,cap_net_admin=eip ./target/release/packetviper
 - [x] Phase 2: All 6 UI tabs, filter DSL, stats, threat detection, export
 - [x] Phase 3: GitHub deployment + documentation
 - [x] Phase 4: GeoIP integration
-- [ ] Phase 5: Packet bookmarking + session save/restore
-- [ ] Phase 6: Color themes + UI customization
-- [ ] Phase 7: Plugin system for custom protocol parsers
-- [ ] Phase 8: TCP stream reassembly
-- [ ] Phase 9: More protocols (FTP, SMTP, MQTT, gRPC)
-- [ ] Phase 10: Performance benchmarks + optimization
+- [x] Phase 5: Packet bookmarking + session save/restore
+- [x] Phase 6: Color themes + UI customization
+- [x] Phase 7: Plugin system for custom protocol parsers
+- [x] Phase 8: TCP stream reassembly
+- [x] Phase 9: More protocols (FTP, SMTP, MQTT, gRPC)
+- [x] Phase 10: Final polish + documentation
 
 ---
 
