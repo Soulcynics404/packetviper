@@ -21,3 +21,6 @@ Thumbs.db
 
 # Exported captures
 exports/
+
+# GeoIP database (large binary)
+data/*.mmdb

@@ -1,5 +1,3 @@
-//! Packet inspection view — detailed packet list + detail pane
-
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -14,7 +12,6 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
             .split(area);
-
         render_packet_list(f, app, chunks[0]);
         render_packet_detail(f, app, chunks[1]);
     } else {
@@ -23,13 +20,23 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_packet_list(f: &mut Frame, app: &App, area: Rect) {
+    let visible_height = area.height.saturating_sub(2) as usize;
+    let start = if app.selected_index >= visible_height {
+        app.selected_index - visible_height + 1
+    } else {
+        0
+    };
+
     let items: Vec<ListItem> = app
         .filtered_indices
         .iter()
         .enumerate()
+        .skip(start)
+        .take(visible_height)
         .map(|(display_idx, &pkt_idx)| {
             let pkt = &app.packets[pkt_idx];
             let is_selected = display_idx == app.selected_index;
+            let is_bookmarked = app.is_bookmarked(pkt.id);
 
             let proto_color = match pkt.protocol.as_str() {
                 "TCP" => Color::Cyan,
@@ -49,9 +56,15 @@ fn render_packet_list(f: &mut Frame, app: &App, area: Rect) {
                 packetviper_core::packets::PacketDirection::Unknown => "─",
             };
 
+            let bookmark_icon = if is_bookmarked { "★ " } else { "  " };
+
             let line = Line::from(vec![
                 Span::styled(
-                    format!(" {:>6} ", pkt.id),
+                    bookmark_icon,
+                    Style::default().fg(Color::Yellow),
+                ),
+                Span::styled(
+                    format!("{:>5} ", pkt.id),
                     Style::default().fg(Color::DarkGray),
                 ),
                 Span::styled(
@@ -68,11 +81,11 @@ fn render_packet_list(f: &mut Frame, app: &App, area: Rect) {
                 ),
                 Span::raw(format!(
                     "{} -> {} ",
-                    truncate_str(&pkt.source, 22),
-                    truncate_str(&pkt.destination, 22)
+                    truncate_str(&pkt.source, 21),
+                    truncate_str(&pkt.destination, 21)
                 )),
                 Span::styled(
-                    format!("{:>6}B", pkt.length),
+                    format!("{:>5}B", pkt.length),
                     Style::default().fg(Color::DarkGray),
                 ),
             ]);
@@ -87,12 +100,19 @@ fn render_packet_list(f: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
+    let bookmark_info = if app.show_bookmarks_only {
+        format!(" [BOOKMARKS: {}] ", app.bookmarked_packets.len())
+    } else {
+        String::new()
+    };
+
     let list = List::new(items).block(
         Block::default()
             .title(format!(
-                " 🔍 Packets [{}/{}] (Enter: detail, j/k: scroll) ",
+                " 🔍 Packets [{}/{}]{} (b: bookmark, B: filter bookmarks) ",
                 app.selected_index + 1,
-                app.filtered_count()
+                app.filtered_count(),
+                bookmark_info,
             ))
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Green)),
@@ -109,13 +129,40 @@ fn render_packet_detail(f: &mut Frame, app: &App, area: Rect) {
                 Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
             )),
             Line::from(format!("  ID:        {}", pkt.id)),
-            Line::from(format!("  Time:      {}", pkt.timestamp.format("%Y-%m-%d %H:%M:%S%.6f"))),
+            Line::from(format!(
+                "  Time:      {}",
+                pkt.timestamp.format("%Y-%m-%d %H:%M:%S%.6f")
+            )),
             Line::from(format!("  Interface: {}", pkt.interface)),
             Line::from(format!("  Direction: {}", pkt.direction)),
             Line::from(format!("  Length:    {} bytes", pkt.length)),
             Line::from(format!("  Protocol:  {}", pkt.protocol)),
+            Line::from(format!(
+                "  Bookmarked: {}",
+                if app.is_bookmarked(pkt.id) { "★ Yes" } else { "No" }
+            )),
             Line::from(""),
         ];
+
+        // GeoIP info
+        if let Some(geo_src) = app.lookup_geo(&pkt.source) {
+            lines.push(Line::from(Span::styled(
+                " ── GeoIP ──",
+                Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
+            )));
+            lines.push(Line::from(format!("  Source:      {}", geo_src)));
+            if let Some(geo_dst) = app.lookup_geo(&pkt.destination) {
+                lines.push(Line::from(format!("  Destination: {}", geo_dst)));
+            }
+            lines.push(Line::from(""));
+        } else if let Some(geo_dst) = app.lookup_geo(&pkt.destination) {
+            lines.push(Line::from(Span::styled(
+                " ── GeoIP ──",
+                Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
+            )));
+            lines.push(Line::from(format!("  Destination: {}", geo_dst)));
+            lines.push(Line::from(""));
+        }
 
         if let Some(ref link) = pkt.layers.link {
             lines.push(Line::from(Span::styled(
@@ -138,7 +185,9 @@ fn render_packet_detail(f: &mut Frame, app: &App, area: Rect) {
         if let Some(ref transport) = pkt.layers.transport {
             lines.push(Line::from(Span::styled(
                 " ── Transport Layer ──",
-                Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
             )));
             lines.push(Line::from(format!("  {}", transport)));
             lines.push(Line::from(""));
@@ -153,10 +202,11 @@ fn render_packet_detail(f: &mut Frame, app: &App, area: Rect) {
             lines.push(Line::from(""));
         }
 
-        // Hex dump
         lines.push(Line::from(Span::styled(
             " ── Hex Dump ──",
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
         )));
         for hex_line in pkt.hex_dump().lines() {
             lines.push(Line::from(Span::styled(
@@ -174,7 +224,7 @@ fn render_packet_detail(f: &mut Frame, app: &App, area: Rect) {
         .wrap(Wrap { trim: false })
         .block(
             Block::default()
-                .title(" 📄 Packet Detail (Enter to close) ")
+                .title(" 📄 Packet Detail ")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Green)),
         );

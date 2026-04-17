@@ -2,7 +2,6 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crate::app::App;
 
 pub fn handle_key_event(app: &mut App, key: KeyEvent) {
-    // Global keybindings
     match key.code {
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.running = false;
@@ -23,7 +22,6 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
         _ => {}
     }
 
-    // Filter input mode
     if app.filter_input_active {
         handle_filter_input(app, key);
         return;
@@ -40,7 +38,7 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
             app.auto_scroll = false;
         }
 
-        // Capture control
+        // Capture
         KeyCode::Char('c') => {
             app.capturing = !app.capturing;
             if app.capturing {
@@ -54,13 +52,12 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
         KeyCode::Char('/') => {
             app.filter_input_active = true;
             app.filter_input.clear();
-            app.status_message = "Filter: type expression, Enter to apply, Esc to cancel".to_string();
+            app.status_message =
+                "Filter: type expression, Enter to apply, Esc to cancel".to_string();
         }
-        KeyCode::Char('x') => {
-            app.clear_filter();
-        }
+        KeyCode::Char('x') => app.clear_filter(),
 
-        // Auto-scroll toggle
+        // Auto-scroll
         KeyCode::Char('a') => {
             app.auto_scroll = !app.auto_scroll;
             app.status_message = format!(
@@ -69,16 +66,14 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
             );
         }
 
+        // Bookmarks
+        KeyCode::Char('b') => app.toggle_bookmark(),
+        KeyCode::Char('B') => app.toggle_bookmarks_view(),
+
         // Export
-        KeyCode::Char('e') => {
-            app.export_json();
-        }
-        KeyCode::Char('E') => {
-            app.export_csv();
-        }
-        KeyCode::Char('p') => {
-            app.export_pcap();
-        }
+        KeyCode::Char('e') => app.export_json(),
+        KeyCode::Char('E') => app.export_csv(),
+        KeyCode::Char('p') => app.export_pcap(),
 
         _ => {}
     }
