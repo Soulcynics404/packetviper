@@ -2,55 +2,187 @@
 
 # 🐍 PacketViper
 
-**A blazing-fast TUI network traffic analyzer built with Rust**
+### A Blazing-Fast TUI Network Traffic Analyzer Built with Rust
 
-[![Rust](https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/Built%20With-Rust-orange?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
-[![GitHub](https://img.shields.io/badge/GitHub-Soulcynics404-blue?style=for-the-badge&logo=github)](https://github.com/Soulcynics404)
+[![Platform](https://img.shields.io/badge/Platform-Linux-blue?style=for-the-badge&logo=linux&logoColor=white)](https://www.linux.org/)
+[![GitHub](https://img.shields.io/badge/Author-Soulcynics404-purple?style=for-the-badge&logo=github)](https://github.com/Soulcynics404)
 
 <img src="https://img.shields.io/badge/status-active_development-brightgreen" />
+<img src="https://img.shields.io/badge/version-0.1.0-blue" />
+<img src="https://img.shields.io/github/languages/code-size/Soulcynics404/packetviper" />
+<img src="https://img.shields.io/github/last-commit/Soulcynics404/packetviper" />
 
 ---
 
 *Real-time packet capture, deep protocol inspection, threat detection, and traffic analysis — all from your terminal.*
 
+**PacketViper** is a terminal-based network traffic analyzer designed for cybersecurity professionals, penetration testers, network administrators, and students. It captures live network packets, parses them across all OSI layers (L2–L7), detects active threats like ARP spoofing and port scanning, and provides a rich dashboard with real-time statistics — all without leaving your terminal.
+
 </div>
+
+---
+
+## 📸 Dashboard Preview
+
+![Dashboard](assets/dashboard.png)
+
+<details>
+<summary>📊 <b>Stats View</b> — Live bandwidth, protocol distribution, top talkers (click to expand)</summary>
+<br>
+
+![Stats](assets/stats.png)
+
+</details>
+
+<details>
+<summary>🔍 <b>Inspection View</b> — Deep packet inspection with hex dump (click to expand)</summary>
+<br>
+
+![Inspection](assets/inspection.png)
+
+</details>
+
+<details>
+<summary>🔧 <b>Filter View</b> — Custom DSL with protocol, IP, port, and compound filters (click to expand)</summary>
+<br>
+
+![Filters](assets/filters.png)
+
+</details>
+
+<details>
+<summary>🛡️ <b>Threat Detection</b> — ARP spoofing, port scanning, DNS tunneling detection (click to expand)</summary>
+<br>
+
+![Threats](assets/threats.png)
+
+</details>
+
+<details>
+<summary>❓ <b>Help View</b> — Complete keybinding reference (click to expand)</summary>
+<br>
+
+![Help](assets/help.png)
+
+</details>
+
+---
+
+## 🎯 Who Is This For?
+
+| Audience | Use Case |
+|----------|----------|
+| 🔐 **Cybersecurity Students** | Learn packet analysis, understand protocol headers, study network attacks |
+| 🕵️ **Penetration Testers** | Monitor attack traffic in real-time, verify ARP spoofing / scanning tools |
+| 🌐 **Network Administrators** | Diagnose network issues, monitor bandwidth, identify rogue traffic |
+| 🧑‍💻 **Developers** | Debug HTTP/DNS/TLS traffic from applications |
+| 📚 **Researchers** | Capture and export traffic datasets for analysis |
+| 🏠 **Home Lab Enthusiasts** | Monitor home network for suspicious activity |
 
 ---
 
 ## ✨ Features
 
-- 🚀 **Real-time packet capture** using raw sockets via `pnet`
-- 🔍 **Deep protocol inspection** — Link, Network, Transport, and Application layers
-- 📊 **Live dashboard** with packet counters, bandwidth stats, and recent activity
-- 🛡️ **Threat detection** — Port scanning, ARP spoofing, DNS tunneling detection
-- 🌍 **GeoIP lookup** — See where traffic is coming from geographically
-- 🔧 **Custom filter DSL** — Powerful filtering with expressions like `tcp && port 443`
-- 📁 **Multi-format export** — JSON, CSV, and PCAP export
-- 🎨 **Beautiful TUI** — Built with Ratatui, vim-style keybindings
-- ⚡ **Blazing fast** — Zero-copy parsing, channel-based async architecture
+### 🚀 Core Capabilities
+- **Real-time packet capture** using raw sockets via `pnet` — no `libpcap` dependency
+- **Promiscuous mode** — captures ALL traffic on the network segment
+- **Multi-threaded architecture** — capture thread + UI thread with lock-free channels
+- **Zero-copy parsing** — efficient packet dissection without unnecessary memory allocation
 
-## 🔧 Supported Protocols
+### 🔬 Deep Protocol Inspection (OSI Layers 2–7)
 
-| Layer | Protocols |
-|-------|-----------|
-| **Link** | Ethernet, ARP |
-| **Network** | IPv4, IPv6, ICMP, ICMPv6 |
-| **Transport** | TCP, UDP |
-| **Application** | HTTP, DNS, TLS (with SNI), SSH, DHCP |
+| OSI Layer | Protocols | Details |
+|-----------|-----------|---------|
+| **Link (L2)** | Ethernet, ARP | MAC addresses, EtherType, ARP request/reply parsing |
+| **Network (L3)** | IPv4, IPv6, ICMP, ICMPv6 | IP addresses, TTL/Hop Limit, flags, DSCP, identification |
+| **Transport (L4)** | TCP, UDP | Ports, sequence/ack numbers, all TCP flags (SYN/ACK/FIN/RST/PSH/URG/ECE/CWR), window size |
+| **Application (L7)** | HTTP, DNS, TLS, SSH, DHCP | HTTP methods/status, DNS queries/answers, TLS version + SNI extraction, SSH version detection |
+
+### 🛡️ Threat Detection Engine
+
+| Threat | Detection Method | Severity |
+|--------|-----------------|----------|
+| **Port Scanning** | >15 unique destination ports from single source within 60s | 🟠 HIGH |
+| **ARP Spoofing** | Multiple MAC addresses claiming same IP via ARP Reply | 🔴 CRITICAL |
+| **DNS Tunneling** | DNS query labels >40 characters or total query >100 chars | 🟡 MEDIUM |
+| **Suspicious Ports** | Traffic to known malware ports (4444, 31337, 6667, etc.) | 🔵 LOW |
+| **DDoS Indicators** | >500 packets in 10 seconds from single source | 🟠 HIGH |
+
+> ✅ **Tested:** Successfully detected ARP spoofing attacks performed with `bettercap` in a live lab environment.
+
+### 🔧 Custom Filter DSL
+
+A powerful domain-specific language for filtering traffic:
+
+## Protocol filters
+
+tcp # All TCP packets (includes HTTP, TLS, SSH)
+udp # All UDP packets (includes DNS, DHCP)
+dns # DNS traffic only
+http || tls # HTTP or TLS
+arp # ARP packets
+!icmp # Everything except ICMP
+
+## Field filters
+
+ip == 192.168.1.1 # Source IP match
+dst == 8.8.8.8 # Destination IP
+port == 443 # Source or destination port
+sport == 80 # Source port only
+dport == 53 # Destination port only
+port 80..443 # Port range
+len > 1000 # Packet size > 1000 bytes
+ttl < 64 # TTL less than 64
+direction == in # Incoming packets only
+
+## Compound filters
+
+tcp && port == 443 # TCP on port 443
+(http || dns) && direction == out
+tcp && len > 500 && dst == 10.0.0.1
+contains "google" # Text search in packet summary
+
+
+### 📊 Live Statistics Dashboard
+- **Bandwidth sparkline graph** — real-time bytes/second visualization
+- **Protocol distribution table** — packet count, bytes, and percentage per protocol
+- **TCP flag analysis** — SYN, ACK, FIN, RST, PSH breakdown
+- **Top sources / destinations / conversations** — ranked by packet count
+- **Directional traffic** — incoming vs outgoing byte counters
+- **Performance metrics** — packets/second, bytes/second, average packet size
+
+### 📁 Multi-Format Export
+- **JSON** — Full packet details with all parsed layer data (`e` key)
+- **CSV** — Summary table for spreadsheet analysis (`E` key)
+- **PCAP** — Industry-standard format, compatible with Wireshark (`p` key)
+
+### 🎨 Terminal UI (TUI)
+- **6 interactive tabs**: Dashboard, Inspection, Stats, Filters, Threats, Help
+- **Vim-style navigation** — `j/k` scroll, `g/G` jump, `/` search
+- **Packet detail pane** with hex dump view
+- **Protocol-colored packet list** — each protocol has a distinct color
+- **Auto-scroll** with toggle
+- **Live status bar** — capture status, packet count, data volume, active filter
+
+---
 
 ## 📋 Prerequisites
 
-- **OS**: Linux (tested on Kali Linux)
-- **Rust**: 1.75+ (install via [rustup](https://rustup.rs/))
-- **Privileges**: Root or `CAP_NET_RAW` capability
+| Requirement | Details |
+|-------------|---------|
+| **Operating System** | Linux (tested on Kali Linux 2024.x) |
+| **Rust** | 1.75 or newer [install via rustup](https://rustup.rs/) |
+| **System Libraries** | `build-essential`, `libpcap-dev`, `pkg-config` |
+| **Privileges** | Root (`sudo`) or `CAP_NET_RAW` + `CAP_NET_ADMIN` capabilities |
+| **Terminal** | Any modern terminal emulator with Unicode support |
+
+---
 
 ## 🚀 Installation
 
-### From Source
+### Install Dependencies (Debian/Ubuntu/Kali)
 ```bash
-git clone https://github.com/Soulcynics404/packetviper.git
-cd packetviper
-cargo build --release
-
-
+sudo apt update
+sudo apt install -y build-essential libpcap-dev pkg-config
