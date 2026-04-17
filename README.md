@@ -196,22 +196,31 @@ sudo apt install -y build-essential libpcap-dev pkg-config
 ## Install Rust (if not already installed)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source ~/.cargo/env
+```
 
 ## Build from Source
+```
 git clone https://github.com/Soulcynics404/packetviper.git
 cd packetviper
 cargo build --release
+```
 
-###Run
+### Run
 
 # List available network interfaces
-sudo ./target/release/packetviper
 
+```
+sudo ./target/release/packetviper
+```
 # Capture on a specific interface
+
+```
 sudo ./target/release/packetviper wlan0    # WiFi
 sudo ./target/release/packetviper eth0     # Ethernet
+```
 
 # Alternative: set capabilities to avoid sudo
+```
 sudo setcap cap_net_raw,cap_net_admin=eip ./target/release/packetviper
 ./target/release/packetviper wlan0
 ```
