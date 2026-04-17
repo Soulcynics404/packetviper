@@ -217,7 +217,7 @@ sudo setcap cap_net_raw,cap_net_admin=eip ./target/release/packetviper
 ```
 
 ### Data Flow
-
+```bash
 ┌──────────────────────────────────────────────────┐
 │              Terminal UI (Ratatui)               │
 │  ┌──────────┐ ┌──────┐ ┌───────┐ ┌──────────┐    │
@@ -237,6 +237,7 @@ sudo setcap cap_net_raw,cap_net_admin=eip ./target/release/packetviper
            ┌───────▼────────┐
            │  Linux Kernel  │
            └────────────────┘
+```
 
 ### 📦 Dependencies
 Crate	           Version                	Purpose
