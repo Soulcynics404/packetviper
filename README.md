@@ -2,7 +2,7 @@
 
 # 🐍 PacketViper
 
-### A Blazing-Fast TUI Network Traffic Analyzer Built with Rust
+### A TUI Network Traffic Analyzer Built with Rust
 
 [![Rust](https://img.shields.io/badge/Built%20With-Rust-orange?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
@@ -182,7 +182,7 @@ contains "google"                        # Text search in packet summary
 |-------------|---------|
 | **Operating System** | Linux (tested on Kali Linux 2024.x) |
 | **Rust** | 1.75 or newer [install via rustup](https://rustup.rs/) |
-| **System Libraries** | `build-essential`, `libpcap-dev`, `pkg-config` |
+| **System Libraries** | `build-essential`, `pkg-config` |
 | **Privileges** | Root (`sudo`) or `CAP_NET_RAW` + `CAP_NET_ADMIN` capabilities |
 | **Terminal** | Any modern terminal emulator with Unicode support |
 
@@ -193,7 +193,7 @@ contains "google"                        # Text search in packet summary
 ### Install Dependencies (Debian/Ubuntu/Kali)
 ```bash
 sudo apt update
-sudo apt install -y build-essential libpcap-dev pkg-config
+sudo apt install -y build-essential pkg-config
 
 ## Install Rust (if not already installed)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -281,7 +281,7 @@ sudo setcap cap_net_raw,cap_net_admin=eip ./target/release/packetviper
 - [x] Phase 6: Color themes + UI customization
 - [x] Phase 7: Plugin system for custom protocol parsers
 - [x] Phase 8: TCP stream reassembly
-- [x] Phase 9: More protocols (FTP, SMTP, MQTT, gRPC)
+- [x] Phase 9: More protocols (FTP, SMTP, MQTT)
 - [x] Phase 10: Final polish + documentation
 
 ---
