@@ -2,7 +2,7 @@
 
 # 🐍 PacketViper
 
-### A TUI Network Traffic Analyzer Built with Rust
+### A Blazing-Fast TUI Network Traffic Analyzer Built with Rust
 
 [![Rust](https://img.shields.io/badge/Built%20With-Rust-orange?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
@@ -281,7 +281,7 @@ sudo setcap cap_net_raw,cap_net_admin=eip ./target/release/packetviper
 - [x] Phase 6: Color themes + UI customization
 - [x] Phase 7: Plugin system for custom protocol parsers
 - [x] Phase 8: TCP stream reassembly
-- [x] Phase 9: More protocols (FTP, SMTP, MQTT)
+- [x] Phase 9: More protocols (FTP, SMTP, MQTT, gRPC)
 - [x] Phase 10: Final polish + documentation
 
 ---
