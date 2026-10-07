@@ -93,8 +93,15 @@ impl CaptureEngine {
 
         log::info!("Starting capture on interface: {}", iface_name);
 
+        // Flush the capture file to disk ~once a second so a service stop loses at most ~1s of data.
+        let mut last_flush = std::time::Instant::now();
+
         // Capture loop
         while running.load(Ordering::SeqCst) {
+            if last_flush.elapsed().as_secs() >= 1 {
+                if let Some(ring) = self.ring.as_mut() { ring.flush(); }
+                last_flush = std::time::Instant::now();
+            }
             match rx.next() {
                 Ok(frame) => {
                     // Full-frame capture to the ring buffer (independent of the 128-byte preview),

@@ -27,6 +27,14 @@ use handler::handle_key_event;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
 
+    // Subcommands. Everything else is treated as `<interface>` for the interactive TUI.
+    match args.get(1).map(|s| s.as_str()) {
+        Some("serve") => return run_serve(args.get(2).map(|s| s.as_str())),
+        Some("install-autostart") => return install_autostart(args.get(2).map(|s| s.as_str())),
+        Some("remove-autostart") => return remove_autostart(),
+        _ => {}
+    }
+
     if args.len() < 2 {
         println!("\n  🐍 PacketViper — Network Traffic Analyzer\n");
         println!("  Usage: {}{} <interface> [session.json]\n", RUN_AS, args[0]);
@@ -49,6 +57,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         println!("\n  Example: {}{} {}\n", RUN_AS, args[0], EXAMPLE_IFACE);
+        println!("  Background / autostart:");
+        println!("    {}{} serve <interface>              run headless (no UI), alerts to desktop", RUN_AS, args[0]);
+        println!("    {}{} install-autostart <interface>  run in background on every boot (opt-in)", RUN_AS, args[0]);
+        println!("    {}{} remove-autostart               undo autostart\n", RUN_AS, args[0]);
         return Ok(());
     }
 
@@ -237,4 +249,155 @@ fn init_logging() -> Option<String> {
 fn sudo_user() -> Option<(u32, u32)> {
     let id = |var| std::env::var(var).ok().and_then(|v| v.parse::<u32>().ok());
     Some((id("SUDO_UID")?, id("SUDO_GID")?))
+}
+
+/// Headless monitor: capture + detect + alert + autosave with no terminal UI. Used by the autostart
+/// service so PacketViper can run in the background. Desktop danger alerts still fire (via tick()).
+/// Runs until the process is stopped (e.g. SIGTERM from the service manager).
+fn run_serve(iface: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(iface) = iface else {
+        eprintln!("Usage: packetviper serve <interface>");
+        return Ok(());
+    };
+    let _log = init_logging();
+    let interfaces = capture::list_interfaces();
+    if !interfaces.iter().any(|i| i.name == iface) {
+        log::error!("serve: interface '{}' not found", iface);
+        eprintln!("Interface '{}' not found", iface);
+        return Ok(());
+    }
+
+    let config = packetviper_core::config::Config::load();
+    let autosave_flag = Arc::new(AtomicBool::new(config.autosave));
+    let mut app = App::new(iface);
+    app.threat_detector.auto_block = config.auto_block;
+    app.autosave_flag = autosave_flag.clone();
+    app.config = config.clone();
+    app.threat_detector.set_local_ips(interfaces.iter().flat_map(|i| i.ips.clone()));
+    app.threat_detector.set_local_macs(interfaces.iter().filter_map(|i| i.mac.clone()));
+    if let Some((ip, mac)) = packetviper_core::platform::default_gateway(iface) {
+        app.threat_detector.set_gateway(iface, &ip, &mac);
+    }
+    app.threat_detector.probe_firewall();
+
+    let (pkt_tx, pkt_rx) = bounded(10000);
+    let mut engine = CaptureEngine::new(iface);
+    let capture_dir = config.sanitized_capture_dir();
+    if let Ok(ring) = packetviper_core::capture::ring::RingWriter::new(&capture_dir, config.ring_bytes()) {
+        engine = engine.with_autosave(ring, autosave_flag.clone());
+    }
+    let running_flag = engine.get_running_flag();
+    let capture_thread = thread::spawn(move || {
+        if let Err(e) = engine.start_capture(pkt_tx) { log::error!("Capture error: {}", e); }
+    });
+
+    app.capturing = true;
+    log::info!("serve: monitoring {} in the background (auto-defence={}, autosave={})", iface, config.auto_block, config.autosave);
+
+    // Stop cleanly on Ctrl-C / SIGTERM so firewall rules are removed and the capture file is flushed.
+    ctrlc_lite::install();
+
+    while !ctrlc_lite::should_stop() {
+        for packet in pkt_rx.try_iter().take(MAX_PACKETS_PER_FRAME) {
+            app.add_packet(packet);
+        }
+        app.tick(); // raises danger alarms + desktop notifications
+        thread::sleep(std::time::Duration::from_millis(50));
+    }
+
+    running_flag.store(false, std::sync::atomic::Ordering::SeqCst);
+    app.threat_detector.unblock_all();
+    drop(pkt_rx);
+    let _ = capture_thread.join();
+    log::info!("serve: stopped");
+    Ok(())
+}
+
+/// Installs an opt-in autostart service so PacketViper monitors in the background on every boot.
+/// Linux: a systemd system service running `serve` as root from the current directory. Other OSes
+/// get printed instructions. Nothing is enabled unless the user runs this command.
+fn install_autostart(iface: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(iface) = iface else {
+        eprintln!("Usage: {}packetviper install-autostart <interface>", RUN_AS);
+        return Ok(());
+    };
+    let exe = std::env::current_exe()?;
+    let cwd = std::env::current_dir()?;
+
+    #[cfg(target_os = "linux")]
+    {
+        let unit = format!(
+            "[Unit]\nDescription=PacketViper network monitor\nAfter=network-online.target\nWants=network-online.target\n\n\
+             [Service]\nType=simple\nUser=root\nWorkingDirectory={cwd}\nExecStart={exe} serve {iface}\nRestart=on-failure\nRestartSec=5\n\n\
+             [Install]\nWantedBy=multi-user.target\n",
+            cwd = cwd.display(), exe = exe.display(), iface = iface,
+        );
+        let path = "/etc/systemd/system/packetviper.service";
+        if let Err(e) = std::fs::write(path, unit) {
+            eprintln!("Could not write {} ({}). Run with sudo.", path, e);
+            return Ok(());
+        }
+        let ok = std::process::Command::new("systemctl").arg("daemon-reload").status().map(|s| s.success()).unwrap_or(false)
+            && std::process::Command::new("systemctl").args(["enable", "--now", "packetviper"]).status().map(|s| s.success()).unwrap_or(false);
+        if ok {
+            println!("✅ Autostart enabled. PacketViper now monitors {} in the background on every boot.", iface);
+            println!("   Watch:  journalctl -u packetviper -f        (and the logs/ folder)");
+            println!("   Stop:   sudo systemctl stop packetviper");
+            println!("   Remove: sudo {} remove-autostart", exe.display());
+            println!("   Config/captures/logs are kept in: {}", cwd.display());
+        } else {
+            eprintln!("Wrote the service file but systemctl enable failed. Check: systemctl status packetviper");
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        println!("Automatic autostart setup is Linux-only for now.");
+        println!("To run on boot manually, have your system start this on login/boot:");
+        println!("   {} serve {}", exe.display(), iface);
+        if cfg!(windows) { println!("Windows: create a Task Scheduler task 'At startup', run as Administrator."); }
+        else { println!("macOS: add a LaunchDaemon that runs the command above."); }
+        let _ = cwd;
+    }
+    Ok(())
+}
+
+/// Removes the autostart service installed by `install-autostart` (Linux).
+fn remove_autostart() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("systemctl").args(["disable", "--now", "packetviper"]).status();
+        let path = "/etc/systemd/system/packetviper.service";
+        match std::fs::remove_file(path) {
+            Ok(()) => {
+                let _ = std::process::Command::new("systemctl").arg("daemon-reload").status();
+                println!("✅ Autostart removed.");
+            }
+            Err(e) => eprintln!("Could not remove {} ({}). Run with sudo.", path, e),
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    println!("Autostart removal is Linux-only; undo the Task Scheduler task / LaunchDaemon you created.");
+    Ok(())
+}
+
+/// Minimal Ctrl-C / SIGTERM handling without extra crates. The handler only sets an atomic flag
+/// (async-signal-safe); the serve loop polls `should_stop()`.
+mod ctrlc_lite {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static STOP: AtomicBool = AtomicBool::new(false);
+
+    /// Installs handlers for SIGINT (2) and SIGTERM (15). No-op on non-Unix.
+    pub fn install() {
+        #[cfg(unix)]
+        unsafe {
+            extern "C" { fn signal(signum: i32, handler: extern "C" fn(i32)) -> usize; }
+            signal(2, on_signal);
+            signal(15, on_signal);
+        }
+    }
+
+    #[cfg(unix)]
+    extern "C" fn on_signal(_sig: i32) { STOP.store(true, Ordering::SeqCst); }
+
+    pub fn should_stop() -> bool { STOP.load(Ordering::SeqCst) }
 }
