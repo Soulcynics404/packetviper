@@ -182,7 +182,7 @@ contains "google"                        # Text search in packet summary
 |-------------|---------|
 | **Operating System** | Linux (tested on Kali Linux 2024.x) |
 | **Rust** | 1.75 or newer [install via rustup](https://rustup.rs/) |
-| **System Libraries** | `build-essential`, `libpcap-dev`, `pkg-config` |
+| **System Libraries** | `build-essential`, `pkg-config` |
 | **Privileges** | Root (`sudo`) or `CAP_NET_RAW` + `CAP_NET_ADMIN` capabilities |
 | **Terminal** | Any modern terminal emulator with Unicode support |
 
@@ -193,7 +193,7 @@ contains "google"                        # Text search in packet summary
 ### Install Dependencies (Debian/Ubuntu/Kali)
 ```bash
 sudo apt update
-sudo apt install -y build-essential libpcap-dev pkg-config
+sudo apt install -y build-essential pkg-config
 
 ## Install Rust (if not already installed)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
