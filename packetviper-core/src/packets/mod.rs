@@ -13,6 +13,22 @@ use network::NetworkLayerInfo;
 use transport::TransportLayerInfo;
 use application::AppLayerInfo;
 
+/// Replaces control characters (ESC, CR, LF, ...) so packet-derived text can't drive the terminal.
+pub fn sanitize(s: &str) -> String {
+    s.chars().map(|c| if c.is_control() { '?' } else { c }).collect()
+}
+
+/// Strips the port from "1.2.3.4:80" or "[2001:db8::1]:80". Bare addresses (v4 or v6) are returned as-is.
+pub fn strip_port(addr: &str) -> &str {
+    if let Some(rest) = addr.strip_prefix('[') {
+        return rest.split(']').next().unwrap_or(rest);
+    }
+    match addr.rsplit_once(':') {
+        Some((ip, port)) if !ip.contains(':') && port.parse::<u16>().is_ok() => ip,
+        _ => addr,
+    }
+}
+
 /// Direction of packet flow
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum PacketDirection {
@@ -68,6 +84,28 @@ pub struct CapturedPacket {
 }
 
 impl CapturedPacket {
+    /// Source IP from the network layer (no port), if the packet has one.
+    pub fn src_ip(&self) -> Option<&str> {
+        use network::NetworkLayerInfo::*;
+        match self.layers.network.as_ref()? {
+            IPv4(i) => Some(&i.src_ip),
+            IPv6(i) => Some(&i.src_ip),
+            Icmp(i) => Some(&i.src_ip),
+            Icmpv6(i) => Some(&i.src_ip),
+        }
+    }
+
+    /// Destination IP from the network layer (no port), if the packet has one.
+    pub fn dst_ip(&self) -> Option<&str> {
+        use network::NetworkLayerInfo::*;
+        match self.layers.network.as_ref()? {
+            IPv4(i) => Some(&i.dst_ip),
+            IPv6(i) => Some(&i.dst_ip),
+            Icmp(i) => Some(&i.dst_ip),
+            Icmpv6(i) => Some(&i.dst_ip),
+        }
+    }
+
     /// Hex dump of raw_preview
     pub fn hex_dump(&self) -> String {
         self.raw_preview
@@ -89,5 +127,24 @@ impl CapturedPacket {
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strip_port_handles_v4_v6_and_bare() {
+        assert_eq!(strip_port("1.2.3.4:80"), "1.2.3.4");
+        assert_eq!(strip_port("1.2.3.4"), "1.2.3.4");
+        assert_eq!(strip_port("[2001:db8::1]:443"), "2001:db8::1");
+        assert_eq!(strip_port("2001:db8::1"), "2001:db8::1");
+        assert_eq!(strip_port("fe80::1:80"), "fe80::1:80");
+    }
+
+    #[test]
+    fn sanitize_replaces_control_chars() {
+        assert_eq!(sanitize("a\x1b[2Jb\r\n"), "a?[2Jb??");
     }
 }

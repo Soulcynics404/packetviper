@@ -1,6 +1,6 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
@@ -18,11 +18,11 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
 
     // Current filter status
     let current_filter = if app.filter_engine.expression().is_empty() {
-        Span::styled("  None (showing all packets)", Style::default().fg(Color::DarkGray))
+        Span::styled("  None (showing all packets)", Style::default().fg(app.theme.text_dim))
     } else {
         Span::styled(
             format!("  {}", app.filter_engine.expression()),
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default().fg(app.theme.accent1).add_modifier(Modifier::BOLD),
         )
     };
 
@@ -39,7 +39,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
                 app.packet_count(),
             ))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Green)),
+            .border_style(Style::default().fg(app.theme.border)),
     );
 
     f.render_widget(filter_status, chunks[0]);
@@ -50,17 +50,17 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             Line::from(""),
             Line::from(Span::styled(
                 "  ▸ Type your filter expression:",
-                Style::default().fg(Color::Yellow),
+                Style::default().fg(app.theme.accent3),
             )),
             Line::from(""),
             Line::from(Span::styled(
                 format!("    {}█", app.filter_input),
-                Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
             Line::from(Span::styled(
                 "  Enter: apply | Esc: cancel",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(app.theme.text_dim),
             )),
         ]
     } else {
@@ -68,19 +68,19 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             Line::from(""),
             Line::from(Span::styled(
                 "  Press '/' to enter a filter expression",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(app.theme.text_dim),
             )),
             Line::from(Span::styled(
                 "  Press 'x' to clear current filter",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(app.theme.text_dim),
             )),
         ]
     };
 
     let border_color = if app.filter_input_active {
-        Color::Yellow
+        app.theme.accent3
     } else {
-        Color::Green
+        app.theme.border
     };
 
     let input_box = Paragraph::new(input_text).block(
@@ -97,7 +97,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
         Line::from(""),
         Line::from(Span::styled(
             " ── Protocol Filters ──",
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            Style::default().fg(app.theme.border).add_modifier(Modifier::BOLD),
         )),
         Line::from("   tcp                       All TCP packets (includes HTTP, TLS, SSH)"),
         Line::from("   udp                       All UDP packets (includes DNS, DHCP)"),
@@ -108,7 +108,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
         Line::from(""),
         Line::from(Span::styled(
             " ── Field Filters ──",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default().fg(app.theme.accent1).add_modifier(Modifier::BOLD),
         )),
         Line::from("   ip == 192.168.1.1         Source IP matches"),
         Line::from("   dst == 8.8.8.8            Destination IP"),
@@ -122,7 +122,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
         Line::from(""),
         Line::from(Span::styled(
             " ── Compound Filters ──",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default().fg(app.theme.accent3).add_modifier(Modifier::BOLD),
         )),
         Line::from("   tcp && port == 443        TCP on port 443"),
         Line::from("   dns || http               DNS or HTTP"),
@@ -136,7 +136,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
         Block::default()
             .title(" 📖 Filter DSL Reference ")
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Green)),
+            .border_style(Style::default().fg(app.theme.border)),
     );
 
     f.render_widget(help_box, chunks[2]);

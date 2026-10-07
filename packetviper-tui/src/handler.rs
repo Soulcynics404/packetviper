@@ -1,12 +1,24 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use crate::app::App;
+use crate::app::{ActiveTab, App, Confirm};
 
 pub fn handle_key_event(app: &mut App, key: KeyEvent) {
+    // A pending confirmation swallows the next key: 'y' runs it, anything else cancels.
+    if let Some(action) = app.pending_confirm.take() {
+        if matches!(key.code, KeyCode::Char('y') | KeyCode::Char('Y')) {
+            match action { Confirm::KillInterface => app.kill_interface() }
+        } else {
+            log::info!("Interface kill cancelled by user");
+            app.status_message = "Cancelled".to_string();
+        }
+        return;
+    }
+
     match key.code {
+        KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => { app.force_redraw = true; return; }
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => { app.running = false; return; }
         KeyCode::Char('q') if !app.filter_input_active => { app.running = false; return; }
-        KeyCode::Tab => { app.active_tab = app.active_tab.next(); return; }
-        KeyCode::BackTab => { app.active_tab = app.active_tab.prev(); return; }
+        KeyCode::Tab | KeyCode::Right if !app.filter_input_active => { app.active_tab = app.active_tab.next(); return; }
+        KeyCode::BackTab | KeyCode::Left if !app.filter_input_active => { app.active_tab = app.active_tab.prev(); return; }
         _ => {}
     }
 
@@ -21,7 +33,26 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
         return;
     }
 
+    if app.active_tab == ActiveTab::Firewall {
+        let n = app.threat_detector.active_blocks.len();
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => { app.firewall_selected = app.firewall_selected.saturating_sub(1); return; }
+            KeyCode::Down | KeyCode::Char('j') => { if app.firewall_selected + 1 < n { app.firewall_selected += 1; } return; }
+            KeyCode::Char('u') => { app.unblock_selected(); return; }
+            KeyCode::Char('U') => { app.unblock_all(); return; }
+            _ => {}
+        }
+    }
+
     match key.code {
+        KeyCode::Char('K') => {
+            app.pending_confirm = Some(Confirm::KillInterface);
+            log::warn!("Interface kill requested for {}, waiting for confirmation", app.interface);
+            app.status_message = format!("Take interface {} DOWN? This cuts your network. y = yes, any other key = cancel", app.interface);
+        }
+        KeyCode::Char('A') => app.toggle_auto_block(),
+        KeyCode::Char(' ') => app.acknowledge_alarm(),
+        KeyCode::Char('?') => app.active_tab = ActiveTab::Help,
         KeyCode::Up | KeyCode::Char('k') => app.scroll_up(),
         KeyCode::Down | KeyCode::Char('j') => app.scroll_down(),
         KeyCode::Enter => app.toggle_detail(),

@@ -24,6 +24,9 @@ pub struct TrafficStats {
     pub outgoing_bytes: u64,
 }
 
+/// Max entries per source/destination/conversation map before one-off entries are pruned.
+const MAX_TRACKED: usize = 50_000;
+
 pub struct BandwidthMonitor {
     source_counts: HashMap<String, u64>,
     dest_counts: HashMap<String, u64>,
@@ -72,8 +75,8 @@ impl BandwidthMonitor {
         *self.protocol_bytes.entry(packet.protocol.clone()).or_insert(0) += packet.length as u64;
 
         // Source/dest tracking (use IP without port)
-        let src = Self::extract_ip(&packet.source);
-        let dst = Self::extract_ip(&packet.destination);
+        let src = crate::packets::strip_port(&packet.source).to_string();
+        let dst = crate::packets::strip_port(&packet.destination).to_string();
         *self.source_counts.entry(src.clone()).or_insert(0) += 1;
         *self.dest_counts.entry(dst.clone()).or_insert(0) += 1;
 
@@ -84,6 +87,13 @@ impl BandwidthMonitor {
             (dst, src)
         };
         *self.conversation_counts.entry(conv_key).or_insert(0) += 1;
+
+        // ponytail: when a map gets huge (spoofed-source flood), drop one-off entries; an LRU would be more precise
+        if self.source_counts.len() > MAX_TRACKED || self.dest_counts.len() > MAX_TRACKED || self.conversation_counts.len() > MAX_TRACKED {
+            self.source_counts.retain(|_, c| *c > 1);
+            self.dest_counts.retain(|_, c| *c > 1);
+            self.conversation_counts.retain(|_, c| *c > 1);
+        }
 
         // Direction bytes
         match &packet.direction {
@@ -121,6 +131,11 @@ impl BandwidthMonitor {
         }
     }
 
+    /// Packets seen so far for a protocol name (as in `CapturedPacket::protocol`).
+    pub fn protocol_count(&self, protocol: &str) -> u64 {
+        self.protocol_counts.get(protocol).copied().unwrap_or(0)
+    }
+
     /// Call this periodically (e.g., every second) to update bandwidth history
     pub fn tick(&mut self) {
         let now = std::time::Instant::now();
@@ -133,7 +148,7 @@ impl BandwidthMonitor {
 
             // Keep last 60 samples (1 minute of data)
             if self.bandwidth_history.len() > 60 {
-                self.bandwidth_history.remove(0);
+                self.bandwidth_history.remove(0); // 60 elements, cheap
             }
 
             self.last_tick_bytes = self.total_bytes;
@@ -145,22 +160,12 @@ impl BandwidthMonitor {
     pub fn snapshot(&self) -> TrafficStats {
         let elapsed = self.start_time.elapsed().as_secs_f64().max(1.0);
 
-        let mut top_sources: Vec<(String, u64)> = self.source_counts.clone().into_iter().collect();
-        top_sources.sort_by(|a, b| b.1.cmp(&a.1));
-        top_sources.truncate(10);
-
-        let mut top_destinations: Vec<(String, u64)> =
-            self.dest_counts.clone().into_iter().collect();
-        top_destinations.sort_by(|a, b| b.1.cmp(&a.1));
-        top_destinations.truncate(10);
-
-        let mut top_conversations: Vec<(String, String, u64)> = self
-            .conversation_counts
-            .iter()
-            .map(|((s, d), c)| (s.clone(), d.clone(), *c))
+        let top_sources = top_n(&self.source_counts, 10).into_iter().map(|(k, c)| (k.clone(), c)).collect();
+        let top_destinations = top_n(&self.dest_counts, 10).into_iter().map(|(k, c)| (k.clone(), c)).collect();
+        let top_conversations = top_n(&self.conversation_counts, 10)
+            .into_iter()
+            .map(|((s, d), c)| (s.clone(), d.clone(), c))
             .collect();
-        top_conversations.sort_by(|a, b| b.2.cmp(&a.2));
-        top_conversations.truncate(10);
 
         TrafficStats {
             total_packets: self.total_packets,
@@ -184,16 +189,15 @@ impl BandwidthMonitor {
         }
     }
 
-    fn extract_ip(addr: &str) -> String {
-        if let Some(last_colon) = addr.rfind(':') {
-            let potential_port = &addr[last_colon + 1..];
-            if potential_port.parse::<u16>().is_ok() {
-                let colon_count = addr.matches(':').count();
-                if colon_count == 1 {
-                    return addr[..last_colon].to_string();
-                }
-            }
-        }
-        addr.to_string()
+}
+
+/// The `n` entries with the highest counts, highest first, without cloning or sorting the whole map.
+fn top_n<K>(map: &HashMap<K, u64>, n: usize) -> Vec<(&K, u64)> {
+    let mut v: Vec<(&K, u64)> = map.iter().map(|(k, c)| (k, *c)).collect();
+    if v.len() > n {
+        v.select_nth_unstable_by(n, |a, b| b.1.cmp(&a.1));
+        v.truncate(n);
     }
+    v.sort_by(|a, b| b.1.cmp(&a.1));
+    v
 }

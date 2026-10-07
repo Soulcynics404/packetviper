@@ -5,6 +5,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Row, Table, Cell};
 
 use crate::app::App;
+use super::truncate;
 use packetviper_core::threat::detector::ThreatLevel;
 
 pub fn render(f: &mut Frame, app: &App, area: Rect) {
@@ -32,7 +33,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
         Line::from(vec![
             Span::styled(
                 format!("  Total: {} ", total),
-                Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD),
             ),
             Span::raw(" | "),
             Span::styled(
@@ -47,7 +48,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             Span::raw(" | "),
             Span::styled(
                 format!("MEDIUM: {} ", medium),
-                Style::default().fg(Color::Yellow),
+                Style::default().fg(app.theme.accent3),
             ),
             Span::raw(" | "),
             Span::styled(
@@ -59,14 +60,14 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
     ])
     .block(
         Block::default()
-            .title(" 🛡️  Threat Summary ")
+            .title(" 🚨 Threat Summary ")
             .borders(Borders::ALL)
             .border_style(Style::default().fg(if critical > 0 {
                 Color::Red
             } else if high > 0 {
                 Color::LightRed
             } else {
-                Color::Green
+                app.theme.border
             })),
     );
 
@@ -78,7 +79,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             Line::from(""),
             Line::from(Span::styled(
                 "  ✅ No threats detected",
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                Style::default().fg(app.theme.border).add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
             Line::from("  The threat detector monitors for:"),
@@ -92,7 +93,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             Block::default()
                 .title(" 📋 Alerts ")
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Green)),
+                .border_style(Style::default().fg(app.theme.border)),
         );
         f.render_widget(no_alerts, chunks[1]);
     } else {
@@ -103,11 +104,11 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             .rev()
             .map(|alert| {
                 let level_color = match alert.level {
-                    ThreatLevel::Critical => Color::Red,
-                    ThreatLevel::High => Color::LightRed,
-                    ThreatLevel::Medium => Color::Yellow,
-                    ThreatLevel::Low => Color::Blue,
-                    ThreatLevel::Info => Color::DarkGray,
+                    ThreatLevel::Critical => app.theme.threat_critical,
+                    ThreatLevel::High => app.theme.threat_high,
+                    ThreatLevel::Medium => app.theme.threat_medium,
+                    ThreatLevel::Low => app.theme.threat_low,
+                    ThreatLevel::Info => app.theme.text_dim,
                 };
 
                 let level_icon = match alert.level {
@@ -126,7 +127,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
                     Cell::from(alert.timestamp.format("%H:%M:%S").to_string()),
                     Cell::from(Span::styled(
                         alert.category.clone(),
-                        Style::default().fg(Color::White),
+                        Style::default().fg(app.theme.text),
                     )),
                     Cell::from(alert.source_ip.clone()),
                     Cell::from(truncate(&alert.description, 45)),
@@ -148,7 +149,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             Row::new(vec![" Level", "Time", "Category", "Source", "Description"])
                 .style(
                     Style::default()
-                        .fg(Color::Green)
+                        .fg(app.theme.border)
                         .add_modifier(Modifier::BOLD),
                 )
                 .bottom_margin(1),
@@ -157,17 +158,10 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             Block::default()
                 .title(format!(" 📋 Alerts ({}) ", app.threat_detector.alert_count()))
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Green)),
+                .border_style(Style::default().fg(app.theme.border)),
         );
 
         f.render_widget(table, chunks[1]);
     }
 }
 
-fn truncate(s: &str, max: usize) -> String {
-    if s.len() > max {
-        format!("{}…", &s[..max - 1])
-    } else {
-        s.to_string()
-    }
-}

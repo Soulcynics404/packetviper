@@ -12,16 +12,6 @@ pub enum ThemeName {
 }
 
 impl ThemeName {
-    pub fn all() -> Vec<ThemeName> {
-        vec![
-            ThemeName::Cyberpunk,
-            ThemeName::Ocean,
-            ThemeName::Matrix,
-            ThemeName::Dracula,
-            ThemeName::Solarized,
-        ]
-    }
-
     pub fn name(&self) -> &str {
         match self {
             ThemeName::Cyberpunk => "Cyberpunk",

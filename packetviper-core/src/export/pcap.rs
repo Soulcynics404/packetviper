@@ -2,14 +2,13 @@
 
 use super::{ExportError, Exporter};
 use crate::packets::CapturedPacket;
-use std::fs::File;
 use std::io::Write;
 
 pub struct PcapExporter;
 
 impl Exporter for PcapExporter {
     fn export(&self, packets: &[CapturedPacket], path: &str) -> Result<(), ExportError> {
-        let mut file = File::create(path)?;
+        let mut file = super::create_private(path)?;
 
         // PCAP Global Header
         let global_header: [u8; 24] = [
@@ -18,7 +17,7 @@ impl Exporter for PcapExporter {
             0x04, 0x00,             // Minor version
             0x00, 0x00, 0x00, 0x00, // Timezone (GMT)
             0x00, 0x00, 0x00, 0x00, // Sigfigs
-            0xff, 0xff, 0x00, 0x00, // Snaplen (65535)
+            0x80, 0x00, 0x00, 0x00, // Snaplen (128): only the first 128 bytes of each frame are kept in memory
             0x01, 0x00, 0x00, 0x00, // Network (Ethernet)
         ];
         file.write_all(&global_header)?;
@@ -27,7 +26,7 @@ impl Exporter for PcapExporter {
             let ts_secs = pkt.timestamp.timestamp() as u32;
             let ts_usecs = pkt.timestamp.timestamp_subsec_micros();
             let cap_len = pkt.raw_preview.len() as u32;
-            let orig_len = pkt.length as u32;
+            let orig_len = u32::try_from(pkt.length).unwrap_or(u32::MAX);
 
             // Packet header (16 bytes)
             file.write_all(&ts_secs.to_le_bytes())?;
@@ -39,6 +38,7 @@ impl Exporter for PcapExporter {
             file.write_all(&pkt.raw_preview)?;
         }
 
+        file.flush()?;
         Ok(())
     }
 }

@@ -64,7 +64,7 @@ pub enum FilterExpr {
     True,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum CompareOp {
     Eq,
     NotEq,
@@ -115,8 +115,18 @@ pub fn parse_filter(input: &str) -> Result<FilterExpr, String> {
         return Ok(FilterExpr::True);
     }
 
+    // Bounds recursion depth from deeply nested parentheses in pasted input.
+    if input.len() > 512 {
+        return Err("Filter too long (max 512 characters)".to_string());
+    }
+
     let tokens = tokenize(input)?;
-    parse_or(&tokens, &mut 0)
+    let mut pos = 0;
+    let expr = parse_or(&tokens, &mut pos)?;
+    if pos != tokens.len() {
+        return Err(format!("Unexpected input after position {}: {:?}", pos, tokens[pos]));
+    }
+    Ok(expr)
 }
 
 fn tokenize(input: &str) -> Result<Vec<Token>, String> {
@@ -206,8 +216,12 @@ fn tokenize(input: &str) -> Result<Vec<Token>, String> {
             continue;
         }
 
-        // Number or range
-        if chars[i].is_ascii_digit() {
+        // Number or range. A digit-led word containing ':' or a single '.' or letters is an
+        // IP address (192.168.1.1, 2001:db8::1) and is lexed as a word below instead.
+        let word_end = (i..chars.len()).find(|&j| !(chars[j].is_alphanumeric() || chars[j] == '.' || chars[j] == ':' || chars[j] == '_')).unwrap_or(chars.len());
+        let run: String = chars[i..word_end].iter().collect();
+        let looks_like_address = run.contains(':') || run.chars().any(|c| c.is_alphabetic()) || (run.contains('.') && !run.contains(".."));
+        if chars[i].is_ascii_digit() && !looks_like_address {
             let start = i;
             while i < chars.len() && chars[i].is_ascii_digit() {
                 i += 1;
@@ -341,7 +355,7 @@ fn parse_primary(tokens: &[Token], pos: &mut usize) -> Result<FilterExpr, String
             if field == "contains" {
                 if *pos < tokens.len() {
                     if let Token::StringValue(s) = &tokens[*pos] {
-                        let s = s.clone();
+                        let s = s.to_lowercase();
                         *pos += 1;
                         return Ok(FilterExpr::Contains(s));
                     }
@@ -384,6 +398,9 @@ fn parse_primary(tokens: &[Token], pos: &mut usize) -> Result<FilterExpr, String
 
                 // Check for range (port 80..443)
                 if let Token::Range(start, end) = &tokens[*pos] {
+                    if *start > u16::MAX as u64 || *end > u16::MAX as u64 || start > end {
+                        return Err(format!("Invalid port range {}..{}", start, end));
+                    }
                     let start = *start as u16;
                     let end = *end as u16;
                     *pos += 1;
@@ -451,5 +468,25 @@ mod tests {
     fn test_empty_filter() {
         let expr = parse_filter("").unwrap();
         assert!(matches!(expr, FilterExpr::True));
+    }
+
+    #[test]
+    fn test_unquoted_ip_literals() {
+        assert!(matches!(parse_filter("ip == 192.168.1.1").unwrap(),
+            FilterExpr::Comparison { value: FilterValue::Str(ref v), .. } if v == "192.168.1.1"));
+        assert!(matches!(parse_filter("ip == 2001:db8::1").unwrap(),
+            FilterExpr::Comparison { value: FilterValue::Str(ref v), .. } if v == "2001:db8::1"));
+    }
+
+    #[test]
+    fn test_trailing_tokens_rejected() {
+        assert!(parse_filter("tcp udp").is_err());
+        assert!(parse_filter("port 80 garbage").is_err());
+    }
+
+    #[test]
+    fn test_port_range_out_of_bounds_rejected() {
+        assert!(parse_filter("port 65536..70000").is_err());
+        assert!(parse_filter("port 443..80").is_err());
     }
 }

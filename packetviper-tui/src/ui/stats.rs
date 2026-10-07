@@ -1,11 +1,11 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Sparkline, Row, Table, Cell};
 
 use crate::app::App;
-use super::format_bytes;
+use super::{format_bytes, truncate};
 
 pub fn render(f: &mut Frame, app: &App, area: Rect) {
     let stats = app.bandwidth_monitor.snapshot();
@@ -32,10 +32,10 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
                     stats.packets_per_second,
                 ))
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Green)),
+                .border_style(Style::default().fg(app.theme.border)),
         )
         .data(&bw_data)
-        .style(Style::default().fg(Color::Cyan));
+        .style(Style::default().fg(app.theme.accent1));
 
     f.render_widget(sparkline, chunks[0]);
 
@@ -59,17 +59,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             } else {
                 0.0
             };
-            let color = match proto.as_str() {
-                "TCP" => Color::Cyan,
-                "UDP" => Color::Yellow,
-                "ICMP" | "ICMPv6" => Color::Green,
-                "DNS" => Color::Magenta,
-                "HTTP" => Color::Blue,
-                "TLS" => Color::Red,
-                "ARP" => Color::LightYellow,
-                "SSH" => Color::LightRed,
-                _ => Color::White,
-            };
+            let color = app.theme.proto_color(proto.as_str());
             Row::new(vec![
                 Cell::from(Span::styled(
                     format!(" {}", proto),
@@ -93,14 +83,14 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
     )
     .header(
         Row::new(vec![" Proto", "Count", "Bytes", "%"])
-            .style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+            .style(Style::default().fg(app.theme.border).add_modifier(Modifier::BOLD))
             .bottom_margin(1),
     )
     .block(
         Block::default()
             .title(" 📊 Protocol Distribution ")
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Green)),
+            .border_style(Style::default().fg(app.theme.border)),
     );
 
     f.render_widget(proto_table, proto_chunks[0]);
@@ -109,7 +99,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
     let mut info_lines = vec![
         Line::from(Span::styled(
             " ── General ──",
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            Style::default().fg(app.theme.border).add_modifier(Modifier::BOLD),
         )),
         Line::from(format!("  Total Packets: {}", stats.total_packets)),
         Line::from(format!("  Total Data:    {}", format_bytes(stats.total_bytes))),
@@ -119,7 +109,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
         Line::from(""),
         Line::from(Span::styled(
             " ── TCP Flags ──",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default().fg(app.theme.accent1).add_modifier(Modifier::BOLD),
         )),
     ];
 
@@ -131,7 +121,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
         Block::default()
             .title(" 📋 Details ")
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Green)),
+            .border_style(Style::default().fg(app.theme.border)),
     );
 
     f.render_widget(info_panel, proto_chunks[1]);
@@ -165,13 +155,13 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
     )
     .header(
         Row::new(vec![" Source", "Pkts"])
-            .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            .style(Style::default().fg(app.theme.accent1).add_modifier(Modifier::BOLD)),
     )
     .block(
         Block::default()
             .title(" 🔼 Top Sources ")
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Green)),
+            .border_style(Style::default().fg(app.theme.border)),
     );
 
     f.render_widget(src_table, talker_chunks[0]);
@@ -195,13 +185,13 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
     )
     .header(
         Row::new(vec![" Destination", "Pkts"])
-            .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            .style(Style::default().fg(app.theme.accent3).add_modifier(Modifier::BOLD)),
     )
     .block(
         Block::default()
             .title(" 🔽 Top Destinations ")
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Green)),
+            .border_style(Style::default().fg(app.theme.border)),
     );
 
     f.render_widget(dst_table, talker_chunks[1]);
@@ -232,22 +222,15 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
     )
     .header(
         Row::new(vec![" Src", "", "Dst", "Pkts"])
-            .style(Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+            .style(Style::default().fg(app.theme.accent2).add_modifier(Modifier::BOLD)),
     )
     .block(
         Block::default()
             .title(" 🔄 Top Conversations ")
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Green)),
+            .border_style(Style::default().fg(app.theme.border)),
     );
 
     f.render_widget(conv_table, talker_chunks[2]);
 }
 
-fn truncate(s: &str, max: usize) -> String {
-    if s.len() > max {
-        format!("{}…", &s[..max - 1])
-    } else {
-        s.to_string()
-    }
-}

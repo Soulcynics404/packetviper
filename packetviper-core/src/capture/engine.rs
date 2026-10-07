@@ -24,7 +24,7 @@ use crate::packets::network::{
     IcmpInfo, Icmpv6Info, IPv4Info, IPv6Info, NetworkLayerInfo,
 };
 use crate::packets::transport::{TcpFlags, TcpInfo, TransportLayerInfo, UdpInfo};
-use crate::packets::{CapturedPacket, LayerInfo, PacketDirection};
+use crate::packets::{sanitize, CapturedPacket, LayerInfo, PacketDirection};
 
 /// The main capture engine
 pub struct CaptureEngine {
@@ -60,6 +60,8 @@ impl CaptureEngine {
 
         let config = Config {
             promiscuous: true,
+            // Wake up regularly so a stop request is noticed even when no packets arrive.
+            read_timeout: Some(std::time::Duration::from_millis(200)),
             ..Default::default()
         };
 
@@ -95,9 +97,11 @@ impl CaptureEngine {
                         }
                     }
                 }
+                Err(e) if e.kind() == std::io::ErrorKind::TimedOut => continue,
                 Err(e) => {
                     log::error!("Capture error: {}", e);
-                    continue;
+                    // Avoid a hot spin if the error persists.
+                    std::thread::sleep(std::time::Duration::from_millis(100));
                 }
             }
         }
@@ -118,9 +122,9 @@ impl CaptureEngine {
 
     /// Determine packet direction based on local IPs
     fn get_direction(src_ip: &str, dst_ip: &str, local_ips: &[String]) -> PacketDirection {
-        if local_ips.contains(&src_ip.to_string()) {
+        if local_ips.iter().any(|ip| ip == src_ip) {
             PacketDirection::Outgoing
-        } else if local_ips.contains(&dst_ip.to_string()) {
+        } else if local_ips.iter().any(|ip| ip == dst_ip) {
             PacketDirection::Incoming
         } else {
             PacketDirection::Unknown
@@ -185,6 +189,9 @@ impl CaptureEngine {
                     source = src_ip.clone();
                     destination = dst_ip.clone();
 
+                    // Non-first fragments carry no transport header; don't parse payload bytes as one.
+                    let proto = if ipv4.get_fragment_offset() > 0 { IpNextHeaderProtocols::Reserved } else { proto };
+
                     // Parse transport layer
                     match proto {
                         IpNextHeaderProtocols::Tcp => {
@@ -224,13 +231,7 @@ impl CaptureEngine {
                                     tcp.payload(),
                                 );
                                 if let Some(ref app) = app_info {
-                                    protocol = match app {
-                                        AppLayerInfo::Http(_) => "HTTP".to_string(),
-                                        AppLayerInfo::Tls(_) => "TLS".to_string(),
-                                        AppLayerInfo::Ssh(_) => "SSH".to_string(),
-                                        AppLayerInfo::Dns(_) => "DNS".to_string(),
-                                        _ => "TCP".to_string(),
-                                    };
+                                    protocol = Self::app_protocol_name(app, "TCP");
                                 }
                             }
                         }
@@ -258,11 +259,7 @@ impl CaptureEngine {
                                     udp.payload(),
                                 );
                                 if let Some(ref app) = app_info {
-                                    protocol = match app {
-                                        AppLayerInfo::Dns(_) => "DNS".to_string(),
-                                        AppLayerInfo::Dhcp(_) => "DHCP".to_string(),
-                                        _ => "UDP".to_string(),
-                                    };
+                                    protocol = Self::app_protocol_name(app, "UDP");
                                 }
                             }
                         }
@@ -342,8 +339,13 @@ impl CaptureEngine {
                                         urgent_pointer: tcp.get_urgent_ptr(),
                                     }));
                                 protocol = "TCP".to_string();
-                                source = format!("{}:{}", source, src_port);
-                                destination = format!("{}:{}", destination, dst_port);
+                                // Brackets keep "addr:port" unambiguous for IPv6.
+                                source = format!("[{}]:{}", source, src_port);
+                                destination = format!("[{}]:{}", destination, dst_port);
+                                app_info = Self::detect_app_protocol(src_port, dst_port, tcp.payload());
+                                if let Some(ref app) = app_info {
+                                    protocol = Self::app_protocol_name(app, "TCP");
+                                }
                             }
                         }
                         IpNextHeaderProtocols::Udp => {
@@ -356,8 +358,12 @@ impl CaptureEngine {
                                         checksum: udp.get_checksum(),
                                     }));
                                 protocol = "UDP".to_string();
-                                source = format!("{}:{}", source, udp.get_source());
-                                destination = format!("{}:{}", destination, udp.get_destination());
+                                source = format!("[{}]:{}", source, udp.get_source());
+                                destination = format!("[{}]:{}", destination, udp.get_destination());
+                                app_info = Self::detect_app_protocol(udp.get_source(), udp.get_destination(), udp.payload());
+                                if let Some(ref app) = app_info {
+                                    protocol = Self::app_protocol_name(app, "UDP");
+                                }
                             }
                         }
                         IpNextHeaderProtocols::Icmpv6 => {
@@ -460,8 +466,31 @@ impl CaptureEngine {
         })
     }
 
+    /// Display protocol name for a detected application layer; `transport` when it has no name of its own.
+    fn app_protocol_name(app: &AppLayerInfo, transport: &str) -> String {
+        match app {
+            AppLayerInfo::Http(_) => "HTTP",
+            AppLayerInfo::Tls(_) => "TLS",
+            AppLayerInfo::Ssh(_) => "SSH",
+            AppLayerInfo::Dns(_) => "DNS",
+            AppLayerInfo::Dhcp(_) => "DHCP",
+            AppLayerInfo::Ftp(_) => "FTP",
+            AppLayerInfo::Smtp(_) => "SMTP",
+            AppLayerInfo::Mqtt(_) => "MQTT",
+            AppLayerInfo::Unknown { .. } => transport,
+        }
+        .to_string()
+    }
+
+    /// Detect the application-layer protocol, with all packet-derived text sanitized for display.
+    fn detect_app_protocol(src_port: u16, dst_port: u16, payload: &[u8]) -> Option<AppLayerInfo> {
+        let mut info = Self::detect_app_protocol_raw(src_port, dst_port, payload)?;
+        info.sanitize();
+        Some(info)
+    }
+
     /// Try to detect the application-layer protocol based on port numbers and payload
-        fn detect_app_protocol(
+    fn detect_app_protocol_raw(
         src_port: u16,
         dst_port: u16,
         payload: &[u8],
@@ -492,13 +521,7 @@ impl CaptureEngine {
 
         // DHCP (ports 67, 68)
         if src_port == 67 || dst_port == 67 || src_port == 68 || dst_port == 68 {
-            return Some(AppLayerInfo::Dhcp(crate::packets::application::DhcpInfo {
-                message_type: "DHCP".to_string(),
-                client_ip: None,
-                your_ip: None,
-                server_ip: None,
-                client_mac: String::new(),
-            }));
+            return Self::parse_dhcp(payload);
         }
 
         // Use plugin system for FTP, SMTP, MQTT
@@ -511,12 +534,47 @@ impl CaptureEngine {
         REGISTRY.with(|registry| registry.try_parse(src_port, dst_port, payload))
     }
 
-    /// Basic HTTP parser
+    /// DHCP (BOOTP) parser: fixed header fields plus option 53 (message type). Requires the magic cookie.
+    fn parse_dhcp(payload: &[u8]) -> Option<AppLayerInfo> {
+        if payload.len() < 240 || payload[236..240] != [0x63, 0x82, 0x53, 0x63] {
+            return None;
+        }
+        let ip = |o: usize| {
+            let a = std::net::Ipv4Addr::new(payload[o], payload[o + 1], payload[o + 2], payload[o + 3]);
+            (!a.is_unspecified()).then(|| a.to_string())
+        };
+        let mac = payload[28..34].iter().map(|b| format!("{:02x}", b)).collect::<Vec<_>>().join(":");
+        let mut message_type = "DHCP".to_string();
+        let mut i = 240;
+        while i + 1 < payload.len() && payload[i] != 255 {
+            if payload[i] == 0 { i += 1; continue; }
+            let len = payload[i + 1] as usize;
+            if payload[i] == 53 && len >= 1 && i + 2 < payload.len() {
+                message_type = match payload[i + 2] {
+                    1 => "Discover", 2 => "Offer", 3 => "Request", 4 => "Decline",
+                    5 => "ACK", 6 => "NAK", 7 => "Release", 8 => "Inform", _ => "DHCP",
+                }.to_string();
+                break;
+            }
+            i += 2 + len;
+        }
+        Some(AppLayerInfo::Dhcp(crate::packets::application::DhcpInfo {
+            message_type,
+            client_ip: ip(12),
+            your_ip: ip(16),
+            server_ip: ip(20),
+            client_mac: mac,
+        }))
+    }
+
+    /// Basic HTTP parser. Only the header block is decoded, so binary bodies don't stop parsing.
     fn parse_http(payload: &[u8]) -> Option<AppLayerInfo> {
-        let text = std::str::from_utf8(payload).ok()?;
+        let header_end = payload.windows(4).position(|w| w == b"\r\n\r\n").unwrap_or(payload.len());
+        let text = String::from_utf8_lossy(&payload[..header_end]);
+        let text = text.as_ref();
         let first_line = text.lines().next()?;
 
-        let methods = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"];
+        let methods = ["GET ", "POST ", "PUT ", "DELETE ", "PATCH ", "HEAD ", "OPTIONS ", "CONNECT "];
         let is_request = methods.iter().any(|m| first_line.starts_with(m));
 
         if is_request {
@@ -624,6 +682,8 @@ impl CaptureEngine {
         let mut name_parts = Vec::new();
         let mut jumped = false;
         let mut return_offset = 0;
+        let mut jumps = 0;
+        let mut name_len = 0;
 
         loop {
             if offset >= payload.len() {
@@ -643,6 +703,11 @@ impl CaptureEngine {
                 if offset + 1 >= payload.len() {
                     return None;
                 }
+                // Pointer loops (e.g. a pointer to itself) would otherwise spin forever.
+                jumps += 1;
+                if jumps > 16 {
+                    return None;
+                }
                 if !jumped {
                     return_offset = offset + 2;
                 }
@@ -655,9 +720,11 @@ impl CaptureEngine {
             if offset + len > payload.len() {
                 return None;
             }
-            if let Ok(label) = std::str::from_utf8(&payload[offset..offset + len]) {
-                name_parts.push(label.to_string());
+            name_len += len + 1;
+            if name_len > 255 {
+                return None;
             }
+            name_parts.push(sanitize(&String::from_utf8_lossy(&payload[offset..offset + len])));
             offset += len;
         }
 
@@ -749,11 +816,12 @@ impl CaptureEngine {
 
         // Extensions length
         if i + 2 > payload.len() { return None; }
-        let _ext_len = u16::from_be_bytes([payload[i], payload[i + 1]]) as usize;
+        let ext_len_total = u16::from_be_bytes([payload[i], payload[i + 1]]) as usize;
         i += 2;
+        let ext_end = (i + ext_len_total).min(payload.len());
 
         // Iterate extensions
-        while i + 4 < payload.len() {
+        while i + 4 <= ext_end {
             let ext_type = u16::from_be_bytes([payload[i], payload[i + 1]]);
             let ext_len = u16::from_be_bytes([payload[i + 2], payload[i + 3]]) as usize;
             i += 4;

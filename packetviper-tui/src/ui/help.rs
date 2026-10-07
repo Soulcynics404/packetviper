@@ -6,14 +6,15 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::app::App;
 
-pub fn render(f: &mut Frame, _app: &App, area: Rect) {
+pub fn render(f: &mut Frame, app: &App, area: Rect) {
     let help_text = vec![
         Line::from(""),
         Line::from(Span::styled(
             "  ── Navigation ──",
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            Style::default().fg(app.theme.border).add_modifier(Modifier::BOLD),
         )),
-        Line::from("   Tab / Shift+Tab    Switch between tabs"),
+        Line::from("   Tab / Shift+Tab    Switch between tabs (also ← / →)"),
+        Line::from("   Ctrl+L             Redraw the screen"),
         Line::from("   j / ↓              Scroll down"),
         Line::from("   k / ↑              Scroll up"),
         Line::from("   g                  Go to first packet"),
@@ -23,26 +24,36 @@ pub fn render(f: &mut Frame, _app: &App, area: Rect) {
         Line::from(""),
         Line::from(Span::styled(
             "  ── Capture ──",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default().fg(app.theme.accent1).add_modifier(Modifier::BOLD),
         )),
-        Line::from("   c                  Start/Stop capture"),
+        Line::from("   c                  Pause/resume capture"),
         Line::from("   /                  Open filter input"),
         Line::from("   x                  Clear current filter"),
         Line::from(""),
         Line::from(Span::styled(
             "  ── Bookmarks ──",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default().fg(app.theme.accent3).add_modifier(Modifier::BOLD),
         )),
         Line::from("   b                  Toggle bookmark on selected packet"),
         Line::from("   B                  Show only bookmarked packets"),
         Line::from(""),
         Line::from(Span::styled(
             "  ── Export ──",
-            Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+            Style::default().fg(app.theme.accent2).add_modifier(Modifier::BOLD),
         )),
         Line::from("   e                  Export to JSON"),
         Line::from("   E                  Export to CSV"),
         Line::from("   p                  Export to PCAP"),
+        Line::from("   s                  Save session"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  ── Firewall ──",
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        )),
+        Line::from("   Space              Acknowledge the danger alarm"),
+        Line::from("   A                  Toggle auto-defence (off by default)"),
+        Line::from("   u / U              Unblock selected / all (Firewall tab)"),
+        Line::from("   K                  Take interface down (asks to confirm)"),
         Line::from(""),
         Line::from(Span::styled(
             "  ── Filter Examples ──",
@@ -59,7 +70,7 @@ pub fn render(f: &mut Frame, _app: &App, area: Rect) {
         Line::from(""),
         Line::from(Span::styled(
             "  ── About ──",
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+            Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD),
         )),
         Line::from("   PacketViper v0.1.0"),
         Line::from("   Network Traffic Analyzer + Threat Detector"),
@@ -72,7 +83,7 @@ pub fn render(f: &mut Frame, _app: &App, area: Rect) {
         Block::default()
             .title(" ❓ Help ")
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Green)),
+            .border_style(Style::default().fg(app.theme.border)),
     );
 
     f.render_widget(paragraph, area);

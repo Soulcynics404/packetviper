@@ -5,6 +5,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
 
 use crate::app::App;
+use super::truncate;
 
 pub fn render(f: &mut Frame, app: &App, area: Rect) {
     if app.show_detail {
@@ -38,17 +39,7 @@ fn render_packet_list(f: &mut Frame, app: &App, area: Rect) {
             let is_selected = display_idx == app.selected_index;
             let is_bookmarked = app.is_bookmarked(pkt.id);
 
-            let proto_color = match pkt.protocol.as_str() {
-                "TCP" => Color::Cyan,
-                "UDP" => Color::Yellow,
-                "ICMP" | "ICMPv6" => Color::Green,
-                "DNS" => Color::Magenta,
-                "HTTP" => Color::Blue,
-                "TLS" => Color::Red,
-                "ARP" => Color::LightYellow,
-                "SSH" => Color::LightRed,
-                _ => Color::White,
-            };
+            let proto_color = app.theme.proto_color(pkt.protocol.as_str());
 
             let direction_icon = match pkt.direction {
                 packetviper_core::packets::PacketDirection::Incoming => "⬇",
@@ -61,15 +52,15 @@ fn render_packet_list(f: &mut Frame, app: &App, area: Rect) {
             let line = Line::from(vec![
                 Span::styled(
                     bookmark_icon,
-                    Style::default().fg(Color::Yellow),
+                    Style::default().fg(app.theme.bookmark),
                 ),
                 Span::styled(
                     format!("{:>5} ", pkt.id),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(app.theme.text_dim),
                 ),
                 Span::styled(
                     format!("{} ", direction_icon),
-                    Style::default().fg(Color::White),
+                    Style::default().fg(app.theme.text),
                 ),
                 Span::styled(
                     format!("{:<6} ", pkt.protocol),
@@ -77,21 +68,21 @@ fn render_packet_list(f: &mut Frame, app: &App, area: Rect) {
                 ),
                 Span::styled(
                     format!("{} ", pkt.timestamp.format("%H:%M:%S")),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(app.theme.text_dim),
                 ),
                 Span::raw(format!(
                     "{} -> {} ",
-                    truncate_str(&pkt.source, 21),
-                    truncate_str(&pkt.destination, 21)
+                    format!("{:<21}", truncate(&pkt.source, 21)),
+                    format!("{:<21}", truncate(&pkt.destination, 21))
                 )),
                 Span::styled(
                     format!("{:>5}B", pkt.length),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(app.theme.text_dim),
                 ),
             ]);
 
             let style = if is_selected {
-                Style::default().bg(Color::DarkGray).fg(Color::White)
+                Style::default().bg(app.theme.selected_bg).fg(app.theme.selected_fg)
             } else {
                 Style::default()
             };
@@ -115,7 +106,7 @@ fn render_packet_list(f: &mut Frame, app: &App, area: Rect) {
                 bookmark_info,
             ))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Green)),
+            .border_style(Style::default().fg(app.theme.border)),
     );
 
     f.render_widget(list, area);
@@ -126,7 +117,7 @@ fn render_packet_detail(f: &mut Frame, app: &App, area: Rect) {
         let mut lines = vec![
             Line::from(Span::styled(
                 " ── General ──",
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                Style::default().fg(app.theme.border).add_modifier(Modifier::BOLD),
             )),
             Line::from(format!("  ID:        {}", pkt.id)),
             Line::from(format!(
@@ -167,7 +158,7 @@ fn render_packet_detail(f: &mut Frame, app: &App, area: Rect) {
         if let Some(ref link) = pkt.layers.link {
             lines.push(Line::from(Span::styled(
                 " ── Link Layer ──",
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                Style::default().fg(app.theme.accent1).add_modifier(Modifier::BOLD),
             )));
             lines.push(Line::from(format!("  {}", link)));
             lines.push(Line::from(""));
@@ -176,7 +167,7 @@ fn render_packet_detail(f: &mut Frame, app: &App, area: Rect) {
         if let Some(ref network) = pkt.layers.network {
             lines.push(Line::from(Span::styled(
                 " ── Network Layer ──",
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                Style::default().fg(app.theme.accent3).add_modifier(Modifier::BOLD),
             )));
             lines.push(Line::from(format!("  {}", network)));
             lines.push(Line::from(""));
@@ -186,7 +177,7 @@ fn render_packet_detail(f: &mut Frame, app: &App, area: Rect) {
             lines.push(Line::from(Span::styled(
                 " ── Transport Layer ──",
                 Style::default()
-                    .fg(Color::Magenta)
+                    .fg(app.theme.accent2)
                     .add_modifier(Modifier::BOLD),
             )));
             lines.push(Line::from(format!("  {}", transport)));
@@ -205,13 +196,13 @@ fn render_packet_detail(f: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::from(Span::styled(
             " ── Hex Dump ──",
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(app.theme.text_dim)
                 .add_modifier(Modifier::BOLD),
         )));
         for hex_line in pkt.hex_dump().lines() {
             lines.push(Line::from(Span::styled(
                 format!("  {}", hex_line),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(app.theme.text_dim),
             )));
         }
 
@@ -226,16 +217,9 @@ fn render_packet_detail(f: &mut Frame, app: &App, area: Rect) {
             Block::default()
                 .title(" 📄 Packet Detail ")
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Green)),
+                .border_style(Style::default().fg(app.theme.border)),
         );
 
     f.render_widget(paragraph, area);
 }
 
-fn truncate_str(s: &str, max_len: usize) -> String {
-    if s.len() > max_len {
-        format!("{}…", &s[..max_len - 1])
-    } else {
-        format!("{:<width$}", s, width = max_len)
-    }
-}

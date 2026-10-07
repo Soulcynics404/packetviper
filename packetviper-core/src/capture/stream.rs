@@ -45,8 +45,8 @@ impl TcpStream {
         let len = std::cmp::min(self.client_data.len(), max_len);
         let slice = &self.client_data[..len];
         if let Ok(text) = std::str::from_utf8(slice) {
-            text.chars()
-                .map(|c| if c.is_control() && c != '\n' && c != '\r' { '.' } else { c })
+            text.chars().filter(|c| *c != '\r')
+                .map(|c| if c.is_control() && c != '\n' { '.' } else { c })
                 .collect()
         } else {
             slice.iter().map(|b| format!("{:02x}", b)).collect::<Vec<_>>().join(" ")
@@ -57,8 +57,8 @@ impl TcpStream {
         let len = std::cmp::min(self.server_data.len(), max_len);
         let slice = &self.server_data[..len];
         if let Ok(text) = std::str::from_utf8(slice) {
-            text.chars()
-                .map(|c| if c.is_control() && c != '\n' && c != '\r' { '.' } else { c })
+            text.chars().filter(|c| *c != '\r')
+                .map(|c| if c.is_control() && c != '\n' { '.' } else { c })
                 .collect()
         } else {
             slice.iter().map(|b| format!("{:02x}", b)).collect::<Vec<_>>().join(" ")
@@ -76,6 +76,9 @@ impl TcpStream {
             / 1000.0
     }
 }
+
+/// Upper bound on tracked streams (each holds up to 8KB of payload).
+const MAX_STREAMS: usize = 2_000;
 
 pub struct StreamTracker {
     streams: HashMap<String, TcpStream>,
@@ -107,10 +110,15 @@ impl StreamTracker {
         protocol: &str,
     ) {
         let key = Self::stream_key(src_ip, src_port, dst_ip, dst_port);
-        let is_client = Self::is_client_direction(src_ip, src_port, dst_ip, dst_port, &key);
 
-        // SYN = new stream
-        if flags_syn && !flags_ack {
+        // SYN = new stream, unless it's a retransmitted SYN for a stream that is still opening/open.
+        let is_retransmit = self.streams.get(&key).is_some_and(|s| {
+            s.src_ip == src_ip && s.src_port == src_port && matches!(s.state, StreamState::Opening | StreamState::Open)
+        });
+        if flags_syn && !flags_ack && !is_retransmit {
+            if self.streams.len() >= MAX_STREAMS {
+                self.evict(timestamp);
+            }
             self.stream_counter += 1;
             let stream = TcpStream {
                 id: self.stream_counter,
@@ -133,6 +141,8 @@ impl StreamTracker {
 
         if let Some(stream) = self.streams.get_mut(&key) {
             stream.last_time = timestamp;
+            // The client is whoever sent the opening SYN.
+            let is_client = stream.src_ip == src_ip && stream.src_port == src_port;
 
             if flags_syn && flags_ack {
                 stream.state = StreamState::Opening;
@@ -208,8 +218,16 @@ impl StreamTracker {
         }
     }
 
-    fn is_client_direction(src_ip: &str, src_port: u16, dst_ip: &str, dst_port: u16, key: &str) -> bool {
-        let forward = format!("{}:{}-{}:{}", src_ip, src_port, dst_ip, dst_port);
-        forward == *key
+    /// Drops closed/closing streams and streams idle for over 5 minutes; if still full, the oldest half.
+    fn evict(&mut self, now: DateTime<Local>) {
+        self.streams.retain(|_, s| {
+            matches!(s.state, StreamState::Opening | StreamState::Open) && now.signed_duration_since(s.last_time).num_seconds() < 300
+        });
+        if self.streams.len() >= MAX_STREAMS {
+            let mut times: Vec<DateTime<Local>> = self.streams.values().map(|s| s.last_time).collect();
+            let mid = times.len() / 2;
+            let cutoff = *times.select_nth_unstable(mid).1;
+            self.streams.retain(|_, s| s.last_time > cutoff);
+        }
     }
 }

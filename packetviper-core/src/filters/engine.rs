@@ -5,6 +5,7 @@ use crate::packets::CapturedPacket;
 use crate::packets::transport::TransportLayerInfo;
 use crate::packets::network::NetworkLayerInfo;
 use crate::packets::PacketDirection;
+use crate::packets::link::LinkLayerInfo;
 
 pub struct FilterEngine {
     filter: FilterExpr,
@@ -48,11 +49,12 @@ impl FilterEngine {
             FilterExpr::True => true,
 
             FilterExpr::Protocol(proto) => {
-                let pkt_proto = packet.protocol.to_lowercase();
                 match proto.as_str() {
-                    "tcp" => pkt_proto == "tcp" || pkt_proto == "http" || pkt_proto == "tls" || pkt_proto == "ssh",
-                    "udp" => pkt_proto == "udp" || pkt_proto == "dns" || pkt_proto == "dhcp",
-                    other => pkt_proto == other,
+                    "tcp" => matches!(packet.layers.transport, Some(TransportLayerInfo::Tcp(_))),
+                    "udp" => matches!(packet.layers.transport, Some(TransportLayerInfo::Udp(_))),
+                    "ipv4" => matches!(packet.layers.network, Some(NetworkLayerInfo::IPv4(_)) | Some(NetworkLayerInfo::Icmp(_))),
+                    "ipv6" => matches!(packet.layers.network, Some(NetworkLayerInfo::IPv6(_)) | Some(NetworkLayerInfo::Icmpv6(_))),
+                    other => packet.protocol.eq_ignore_ascii_case(other),
                 }
             }
 
@@ -77,11 +79,10 @@ impl FilterEngine {
             FilterExpr::Not(e) => !Self::eval(e, packet),
 
             FilterExpr::Contains(s) => {
-                let s_lower = s.to_lowercase();
-                packet.summary.to_lowercase().contains(&s_lower)
-                    || packet.source.to_lowercase().contains(&s_lower)
-                    || packet.destination.to_lowercase().contains(&s_lower)
-                    || packet.protocol.to_lowercase().contains(&s_lower)
+                // Pattern is lowercased once at parse time.
+                [&packet.summary, &packet.source, &packet.destination, &packet.protocol]
+                    .iter()
+                    .any(|h| contains_ignore_ascii_case(h, s))
             }
         }
     }
@@ -93,9 +94,29 @@ impl FilterEngine {
         packet: &CapturedPacket,
     ) -> bool {
         match field {
-            "ip" | "src" => {
+            "ip" => {
                 if let FilterValue::Str(target) = value {
-                    let src = Self::extract_ip(&packet.source);
+                    let either = Self::compare_str(crate::packets::strip_port(&packet.source), &CompareOp::Eq, target)
+                        || Self::compare_str(crate::packets::strip_port(&packet.destination), &CompareOp::Eq, target);
+                    Self::apply_either(either, op)
+                } else {
+                    false
+                }
+            }
+            "mac" => {
+                if let FilterValue::Str(target) = value {
+                    match &packet.layers.link {
+                        Some(LinkLayerInfo::Ethernet(e)) => Self::apply_either(e.src_mac.eq_ignore_ascii_case(target) || e.dst_mac.eq_ignore_ascii_case(target), op),
+                        Some(LinkLayerInfo::Arp(a)) => Self::apply_either(a.sender_mac.eq_ignore_ascii_case(target) || a.target_mac.eq_ignore_ascii_case(target), op),
+                        _ => false,
+                    }
+                } else {
+                    false
+                }
+            }
+            "src" => {
+                if let FilterValue::Str(target) = value {
+                    let src = crate::packets::strip_port(&packet.source).to_string();
                     Self::compare_str(&src, op, target)
                 } else {
                     false
@@ -103,7 +124,7 @@ impl FilterEngine {
             }
             "dst" => {
                 if let FilterValue::Str(target) = value {
-                    let dst = Self::extract_ip(&packet.destination);
+                    let dst = crate::packets::strip_port(&packet.destination).to_string();
                     Self::compare_str(&dst, op, target)
                 } else {
                     false
@@ -116,8 +137,12 @@ impl FilterEngine {
                             TransportLayerInfo::Tcp(tcp) => (tcp.src_port, tcp.dst_port),
                             TransportLayerInfo::Udp(udp) => (udp.src_port, udp.dst_port),
                         };
-                        Self::compare_num(src as u64, op, *target_port)
-                            || Self::compare_num(dst as u64, op, *target_port)
+                        if *op == CompareOp::NotEq {
+                            src as u64 != *target_port && dst as u64 != *target_port
+                        } else {
+                            Self::compare_num(src as u64, op, *target_port)
+                                || Self::compare_num(dst as u64, op, *target_port)
+                        }
                     } else {
                         false
                     }
@@ -217,26 +242,20 @@ impl FilterEngine {
         }
     }
 
-    fn extract_ip(addr: &str) -> String {
-        // Remove port from "ip:port" format
-        if let Some(last_colon) = addr.rfind(':') {
-            let potential_port = &addr[last_colon + 1..];
-            if potential_port.parse::<u16>().is_ok() {
-                // Check if it's IPv6 (contains multiple colons)
-                let colon_count = addr.matches(':').count();
-                if colon_count == 1 {
-                    // IPv4:port
-                    return addr[..last_colon].to_string();
-                }
-            }
+
+    /// For fields that match on either side (ip, mac): `==` means either side equals, `!=` means neither does.
+    fn apply_either(either_equal: bool, op: &CompareOp) -> bool {
+        match op {
+            CompareOp::Eq => either_equal,
+            CompareOp::NotEq => !either_equal,
+            _ => false,
         }
-        addr.to_string()
     }
 
     fn compare_str(actual: &str, op: &CompareOp, expected: &str) -> bool {
         match op {
-            CompareOp::Eq => actual.to_lowercase() == expected.to_lowercase(),
-            CompareOp::NotEq => actual.to_lowercase() != expected.to_lowercase(),
+            CompareOp::Eq => actual.eq_ignore_ascii_case(expected),
+            CompareOp::NotEq => !actual.eq_ignore_ascii_case(expected),
             _ => false,
         }
     }
@@ -251,4 +270,9 @@ impl FilterEngine {
             CompareOp::LtEq => actual <= expected,
         }
     }
+}
+
+/// `needle` must already be lowercase.
+fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
+    needle.is_empty() || haystack.as_bytes().windows(needle.len()).any(|w| w.eq_ignore_ascii_case(needle.as_bytes()))
 }

@@ -2,7 +2,9 @@
 
 use crate::packets::CapturedPacket;
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::Write;
+
+const MAX_SESSION_BYTES: u64 = 1_000_000_000;
 
 pub struct SessionManager;
 
@@ -16,28 +18,24 @@ impl SessionManager {
             packets: packets.to_vec(),
         };
 
-        let json = serde_json::to_string(&session)
-            .map_err(|e| format!("Serialization error: {}", e))?;
-
-        let mut file = File::create(path)
+        let mut file = super::create_private(path)
             .map_err(|e| format!("File error: {}", e))?;
-
-        file.write_all(json.as_bytes())
-            .map_err(|e| format!("Write error: {}", e))?;
+        serde_json::to_writer(&mut file, &session)
+            .map_err(|e| format!("Serialization error: {}", e))?;
+        file.flush().map_err(|e| format!("Write error: {}", e))?;
 
         Ok(path.to_string())
     }
 
     /// Load packets from a session file
     pub fn load(path: &str) -> Result<SessionData, String> {
-        let mut file = File::open(path)
+        let file = File::open(path)
             .map_err(|e| format!("File error: {}", e))?;
-
-        let mut contents = String::new();
-        file.read_to_string(&mut contents)
-            .map_err(|e| format!("Read error: {}", e))?;
-
-        let session: SessionData = serde_json::from_str(&contents)
+        let size = file.metadata().map_err(|e| format!("File error: {}", e))?.len();
+        if size > MAX_SESSION_BYTES {
+            return Err(format!("Session file too large ({} MB, max {} MB)", size / 1_000_000, MAX_SESSION_BYTES / 1_000_000));
+        }
+        let session: SessionData = serde_json::from_reader(std::io::BufReader::new(file))
             .map_err(|e| format!("Parse error: {}", e))?;
 
         Ok(session)

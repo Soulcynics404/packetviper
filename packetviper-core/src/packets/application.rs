@@ -106,6 +106,28 @@ pub struct MqttInfo {
     pub client_id: Option<String>,
 }
 
+impl AppLayerInfo {
+    /// Replaces control characters in every packet-derived string field (see `packets::sanitize`).
+    pub fn sanitize(&mut self) {
+        fn s(v: &mut String) { if v.chars().any(char::is_control) { *v = super::sanitize(v); } }
+        fn o(v: &mut Option<String>) { if let Some(v) = v { s(v); } }
+        match self {
+            AppLayerInfo::Http(h) => { o(&mut h.method); o(&mut h.uri); s(&mut h.version); o(&mut h.host); o(&mut h.user_agent); o(&mut h.content_type); }
+            AppLayerInfo::Dns(d) => {
+                for q in &mut d.questions { s(&mut q.name); s(&mut q.record_type); s(&mut q.class); }
+                for a in &mut d.answers { s(&mut a.name); s(&mut a.record_type); s(&mut a.data); }
+            }
+            AppLayerInfo::Tls(t) => { s(&mut t.version); s(&mut t.content_type); o(&mut t.handshake_type); o(&mut t.sni); o(&mut t.cipher_suite); }
+            AppLayerInfo::Ssh(x) => { o(&mut x.version); s(&mut x.message_type); }
+            AppLayerInfo::Dhcp(x) => { s(&mut x.message_type); o(&mut x.client_ip); o(&mut x.your_ip); o(&mut x.server_ip); s(&mut x.client_mac); }
+            AppLayerInfo::Ftp(x) => { o(&mut x.command); o(&mut x.args); o(&mut x.response_message); }
+            AppLayerInfo::Smtp(x) => { o(&mut x.command); o(&mut x.args); o(&mut x.response_message); o(&mut x.from); o(&mut x.to); }
+            AppLayerInfo::Mqtt(x) => { s(&mut x.message_type); o(&mut x.topic); o(&mut x.client_id); }
+            AppLayerInfo::Unknown { .. } => {}
+        }
+    }
+}
+
 impl std::fmt::Display for AppLayerInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

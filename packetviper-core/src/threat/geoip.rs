@@ -54,8 +54,7 @@ impl GeoIpLookup {
                 }
             }
         } else {
-            log::warn!("GeoIP database not found: {}", db_path);
-            None
+            None // caller decides whether a missing database is worth reporting
         };
 
         Self { reader }
@@ -71,7 +70,7 @@ impl GeoIpLookup {
         let reader = self.reader.as_ref()?;
 
         // Clean IP (remove port if present)
-        let clean_ip = Self::clean_ip(ip_str);
+        let clean_ip = crate::packets::strip_port(ip_str).to_string();
 
         // Skip private/local IPs
         if Self::is_private_ip(&clean_ip) {
@@ -130,11 +129,8 @@ impl GeoIpLookup {
 
     /// Get country flag emoji from country code
     pub fn country_flag(country_code: &str) -> String {
-        if country_code.len() != 2 || country_code == "??" {
-            return "🌐".to_string();
-        }
-        let bytes = country_code.to_uppercase().as_bytes().to_vec();
-        if bytes.len() == 2 {
+        let bytes = country_code.to_ascii_uppercase().into_bytes();
+        if bytes.len() == 2 && bytes.iter().all(u8::is_ascii_uppercase) {
             let c1 = char::from_u32(0x1F1E6 + (bytes[0] - b'A') as u32);
             let c2 = char::from_u32(0x1F1E6 + (bytes[1] - b'A') as u32);
             if let (Some(c1), Some(c2)) = (c1, c2) {
@@ -144,19 +140,6 @@ impl GeoIpLookup {
         "🌐".to_string()
     }
 
-    fn clean_ip(ip_str: &str) -> String {
-        // Handle IPv4:port
-        if let Some(last_colon) = ip_str.rfind(':') {
-            let after_colon = &ip_str[last_colon + 1..];
-            if after_colon.parse::<u16>().is_ok() {
-                let colon_count = ip_str.matches(':').count();
-                if colon_count == 1 {
-                    return ip_str[..last_colon].to_string();
-                }
-            }
-        }
-        ip_str.to_string()
-    }
 
     fn is_private_ip(ip_str: &str) -> bool {
         if let Ok(ip) = ip_str.parse::<IpAddr>() {
@@ -168,6 +151,8 @@ impl GeoIpLookup {
                         || v4.is_broadcast()
                         || v4.is_multicast()
                         || v4.is_unspecified()
+                        // 100.64.0.0/10 carrier-grade NAT
+                        || (v4.octets()[0] == 100 && (v4.octets()[1] & 0xC0) == 64)
                 }
                 IpAddr::V6(v6) => {
                     v6.is_loopback()

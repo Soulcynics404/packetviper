@@ -72,6 +72,9 @@ impl Connection {
     }
 }
 
+/// Upper bound on tracked connections so spoofed-source floods can't grow memory without limit.
+const MAX_CONNECTIONS: usize = 10_000;
+
 pub struct ConnectionTracker {
     pub connections: HashMap<String, Connection>,
 }
@@ -84,152 +87,78 @@ impl ConnectionTracker {
     }
 
     pub fn track_packet(&mut self, packet: &CapturedPacket) {
-        if let Some(ref transport) = packet.layers.transport {
-            match transport {
-                TransportLayerInfo::Tcp(tcp) => {
-                    let src_ip = Self::extract_ip(&packet.source);
-                    let dst_ip = Self::extract_ip(&packet.destination);
-                    let key = Connection::key(
-                        &src_ip,
-                        tcp.src_port,
-                        &dst_ip,
-                        tcp.dst_port,
-                    );
+        let Some(transport) = &packet.layers.transport else { return };
+        let (sport, dport, transport_name) = match transport {
+            TransportLayerInfo::Tcp(t) => (t.src_port, t.dst_port, "TCP"),
+            TransportLayerInfo::Udp(u) => (u.src_port, u.dst_port, "UDP"),
+        };
+        let src_ip = crate::packets::strip_port(&packet.source);
+        let dst_ip = crate::packets::strip_port(&packet.destination);
+        let key = Connection::key(src_ip, sport, dst_ip, dport);
 
-                    let is_forward = (src_ip.as_str(), tcp.src_port)
-                        < (dst_ip.as_str(), tcp.dst_port);
+        if !self.connections.contains_key(&key) && self.connections.len() >= MAX_CONNECTIONS {
+            self.evict_idle(packet.timestamp);
+        }
 
-                    let conn = self
-                        .connections
-                        .entry(key)
-                        .or_insert_with(|| Connection {
-                            src_ip: if is_forward {
-                                src_ip.clone()
-                            } else {
-                                dst_ip.clone()
-                            },
-                            src_port: if is_forward {
-                                tcp.src_port
-                            } else {
-                                tcp.dst_port
-                            },
-                            dst_ip: if is_forward {
-                                dst_ip.clone()
-                            } else {
-                                src_ip.clone()
-                            },
-                            dst_port: if is_forward {
-                                tcp.dst_port
-                            } else {
-                                tcp.src_port
-                            },
-                            state: ConnectionState::SynSent,
-                            packets_sent: 0,
-                            packets_recv: 0,
-                            bytes_sent: 0,
-                            bytes_recv: 0,
-                            start_time: packet.timestamp,
-                            last_seen: packet.timestamp,
-                            protocol: packet.protocol.clone(),
-                        });
-
-                    // Update counts
-                    if is_forward {
-                        conn.packets_sent += 1;
-                        conn.bytes_sent += packet.length as u64;
-                    } else {
-                        conn.packets_recv += 1;
-                        conn.bytes_recv += packet.length as u64;
-                    }
-                    conn.last_seen = packet.timestamp;
-
-                    // Update state machine
-                    if tcp.flags.syn && !tcp.flags.ack {
-                        conn.state = ConnectionState::SynSent;
-                    } else if tcp.flags.syn && tcp.flags.ack {
-                        conn.state = ConnectionState::SynAckReceived;
-                    } else if tcp.flags.ack
-                        && !tcp.flags.syn
-                        && !tcp.flags.fin
-                        && !tcp.flags.rst
-                    {
-                        if conn.state == ConnectionState::SynAckReceived
-                            || conn.state == ConnectionState::SynSent
-                        {
-                            conn.state = ConnectionState::Established;
-                        }
-                    } else if tcp.flags.fin {
-                        conn.state = ConnectionState::FinWait;
-                    } else if tcp.flags.rst {
-                        conn.state = ConnectionState::Reset;
-                    }
-
-                    // Update protocol if app-layer detected
-                    if packet.protocol != "TCP" {
-                        conn.protocol = packet.protocol.clone();
-                    }
-                }
-                TransportLayerInfo::Udp(udp) => {
-                    let src_ip = Self::extract_ip(&packet.source);
-                    let dst_ip = Self::extract_ip(&packet.destination);
-                    let key = Connection::key(
-                        &src_ip,
-                        udp.src_port,
-                        &dst_ip,
-                        udp.dst_port,
-                    );
-
-                    let is_forward = (src_ip.as_str(), udp.src_port)
-                        < (dst_ip.as_str(), udp.dst_port);
-
-                    let conn = self
-                        .connections
-                        .entry(key)
-                        .or_insert_with(|| Connection {
-                            src_ip: if is_forward {
-                                src_ip.clone()
-                            } else {
-                                dst_ip.clone()
-                            },
-                            src_port: if is_forward {
-                                udp.src_port
-                            } else {
-                                udp.dst_port
-                            },
-                            dst_ip: if is_forward {
-                                dst_ip.clone()
-                            } else {
-                                src_ip.clone()
-                            },
-                            dst_port: if is_forward {
-                                udp.dst_port
-                            } else {
-                                udp.src_port
-                            },
-                            state: ConnectionState::Established,
-                            packets_sent: 0,
-                            packets_recv: 0,
-                            bytes_sent: 0,
-                            bytes_recv: 0,
-                            start_time: packet.timestamp,
-                            last_seen: packet.timestamp,
-                            protocol: packet.protocol.clone(),
-                        });
-
-                    if is_forward {
-                        conn.packets_sent += 1;
-                        conn.bytes_sent += packet.length as u64;
-                    } else {
-                        conn.packets_recv += 1;
-                        conn.bytes_recv += packet.length as u64;
-                    }
-                    conn.last_seen = packet.timestamp;
-
-                    if packet.protocol != "UDP" {
-                        conn.protocol = packet.protocol.clone();
-                    }
-                }
+        let conn = self.connections.entry(key).or_insert_with(|| {
+            // The initiator is the client. A SYN+ACK as the first packet seen means the sender is the server.
+            let sender_is_server = matches!(transport, TransportLayerInfo::Tcp(t) if t.flags.syn && t.flags.ack);
+            let (c_ip, c_port, s_ip, s_port) = if sender_is_server { (dst_ip, dport, src_ip, sport) } else { (src_ip, sport, dst_ip, dport) };
+            Connection {
+                src_ip: c_ip.to_string(),
+                src_port: c_port,
+                dst_ip: s_ip.to_string(),
+                dst_port: s_port,
+                state: if transport_name == "TCP" { ConnectionState::SynSent } else { ConnectionState::Established },
+                packets_sent: 0,
+                packets_recv: 0,
+                bytes_sent: 0,
+                bytes_recv: 0,
+                start_time: packet.timestamp,
+                last_seen: packet.timestamp,
+                protocol: packet.protocol.clone(),
             }
+        });
+
+        // "sent" = client to server.
+        if conn.src_ip == src_ip && conn.src_port == sport {
+            conn.packets_sent += 1;
+            conn.bytes_sent += packet.length as u64;
+        } else {
+            conn.packets_recv += 1;
+            conn.bytes_recv += packet.length as u64;
+        }
+        conn.last_seen = packet.timestamp;
+
+        if let TransportLayerInfo::Tcp(tcp) = transport {
+            if tcp.flags.rst {
+                conn.state = ConnectionState::Reset;
+            } else if tcp.flags.fin {
+                conn.state = ConnectionState::FinWait;
+            } else if tcp.flags.syn && tcp.flags.ack {
+                conn.state = ConnectionState::SynAckReceived;
+            } else if tcp.flags.syn {
+                conn.state = ConnectionState::SynSent;
+            } else if tcp.flags.ack && matches!(conn.state, ConnectionState::SynSent | ConnectionState::SynAckReceived) {
+                conn.state = ConnectionState::Established;
+            }
+        }
+
+        // Update protocol if app-layer detected
+        if packet.protocol != transport_name {
+            conn.protocol = packet.protocol.clone();
+        }
+    }
+
+    /// Drops connections idle for over 5 minutes; if still full, drops the least recently seen half.
+    fn evict_idle(&mut self, now: DateTime<Local>) {
+        self.connections.retain(|_, c| now.signed_duration_since(c.last_seen).num_seconds() < 300);
+        if self.connections.len() >= MAX_CONNECTIONS {
+            let mut seen: Vec<DateTime<Local>> = self.connections.values().map(|c| c.last_seen).collect();
+            let mid = seen.len() / 2;
+            let (_, cutoff, _) = seen.select_nth_unstable(mid);
+            let cutoff = *cutoff;
+            self.connections.retain(|_, c| c.last_seen > cutoff);
         }
     }
 
@@ -254,16 +183,4 @@ impl ConnectionTracker {
         self.connections.len()
     }
 
-    fn extract_ip(addr: &str) -> String {
-        if let Some(last_colon) = addr.rfind(':') {
-            let after = &addr[last_colon + 1..];
-            if after.parse::<u16>().is_ok() {
-                let colon_count = addr.matches(':').count();
-                if colon_count == 1 {
-                    return addr[..last_colon].to_string();
-                }
-            }
-        }
-        addr.to_string()
-    }
 }

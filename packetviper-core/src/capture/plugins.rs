@@ -8,7 +8,7 @@ pub trait ProtocolPlugin: Send + Sync {
     fn name(&self) -> &str;
 
     /// Ports this plugin should be tried on (empty = try on all)
-    fn ports(&self) -> Vec<u16>;
+    fn ports(&self) -> &'static [u16];
 
     /// Try to parse the payload. Return None if this plugin doesn't match.
     fn parse(&self, src_port: u16, dst_port: u16, payload: &[u8]) -> Option<AppLayerInfo>;
@@ -69,7 +69,7 @@ struct FtpPlugin;
 impl ProtocolPlugin for FtpPlugin {
     fn name(&self) -> &str { "FTP" }
     fn description(&self) -> &str { "File Transfer Protocol parser" }
-    fn ports(&self) -> Vec<u16> { vec![21, 20] }
+    fn ports(&self) -> &'static [u16] { &[21] } // 20 is the data channel, not commands
 
     fn parse(&self, src_port: u16, _dst_port: u16, payload: &[u8]) -> Option<AppLayerInfo> {
         if payload.is_empty() { return None; }
@@ -126,7 +126,7 @@ struct SmtpPlugin;
 impl ProtocolPlugin for SmtpPlugin {
     fn name(&self) -> &str { "SMTP" }
     fn description(&self) -> &str { "Simple Mail Transfer Protocol parser" }
-    fn ports(&self) -> Vec<u16> { vec![25, 465, 587] }
+    fn ports(&self) -> &'static [u16] { &[25, 587] } // 465 is implicit TLS
 
     fn parse(&self, src_port: u16, _dst_port: u16, payload: &[u8]) -> Option<AppLayerInfo> {
         if payload.is_empty() { return None; }
@@ -172,13 +172,13 @@ impl ProtocolPlugin for SmtpPlugin {
             if cmd == "MAIL" {
                 from = args.as_ref().and_then(|a| {
                     a.find('<').and_then(|start| {
-                        a.find('>').map(|end| a[start + 1..end].to_string())
+                        a[start + 1..].find('>').map(|end| a[start + 1..start + 1 + end].to_string())
                     })
                 });
             } else if cmd == "RCPT" {
                 to = args.as_ref().and_then(|a| {
                     a.find('<').and_then(|start| {
-                        a.find('>').map(|end| a[start + 1..end].to_string())
+                        a[start + 1..].find('>').map(|end| a[start + 1..start + 1 + end].to_string())
                     })
                 });
             }
@@ -204,7 +204,7 @@ struct MqttPlugin;
 impl ProtocolPlugin for MqttPlugin {
     fn name(&self) -> &str { "MQTT" }
     fn description(&self) -> &str { "Message Queuing Telemetry Transport parser" }
-    fn ports(&self) -> Vec<u16> { vec![1883, 8883] }
+    fn ports(&self) -> &'static [u16] { &[1883] } // 8883 is TLS
 
     fn parse(&self, _src_port: u16, _dst_port: u16, payload: &[u8]) -> Option<AppLayerInfo> {
         if payload.len() < 2 { return None; }
@@ -243,11 +243,6 @@ impl ProtocolPlugin for MqttPlugin {
             if multiplier > 128 * 128 * 128 { return None; }
         }
         let header_len = i + 1;
-
-        // Validate total length
-        if payload.len() < header_len + remaining_length as usize {
-            // Might be fragmented, still report what we know
-        }
 
         let mut topic = None;
         let mut client_id = None;
