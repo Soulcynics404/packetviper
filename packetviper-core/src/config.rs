@@ -32,9 +32,8 @@ pub struct Config {
     pub relay_enabled: bool,
     /// Relay base URL, e.g. "http://1.2.3.4:9000" (your AWS instance). http:// only in this version.
     pub relay_url: String,
-    /// View code (room name, in the phone link) used with the relay; generated on first use if empty.
-    pub relay_code: String,
-    /// Push key (laptop-only secret, sent in a header) authorizing writes to the room; generated if empty.
+    /// Push key: the single relay secret (laptop-only); generated if empty. The phone's view code is
+    /// derived from it as sha256(key), so it is not stored separately.
     pub relay_push_key: String,
 }
 
@@ -50,7 +49,6 @@ impl Default for Config {
             http_allow_control: true,
             relay_enabled: false,
             relay_url: String::new(),
-            relay_code: String::new(),
             relay_push_key: String::new(),
         }
     }

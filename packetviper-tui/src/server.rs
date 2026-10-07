@@ -236,8 +236,16 @@ fn query_token(query: &str) -> String {
     query.split('&').find_map(|kv| kv.strip_prefix("t=")).unwrap_or("").to_string()
 }
 
-/// A random pair code (room + secret) for the relay, from the OS CSPRNG. None if unavailable.
+/// A random secret (used as the relay push key) from the OS CSPRNG. None if unavailable.
 pub fn gen_pair_code() -> Option<String> { random_token() }
+
+/// The relay room/view code derived from the push key: first 16 bytes of SHA-256, hex. Must match the
+/// relay's own derivation. The code is public (in the phone link); the key can't be recovered from it.
+pub fn view_code(push_key: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let h = Sha256::digest(push_key.as_bytes());
+    h[..16].iter().map(|b| format!("{:02x}", b)).collect()
+}
 
 /// A 128-bit URL-safe token from the OS cryptographic RNG. Returns None if secure randomness is
 /// unavailable — we refuse to serve with a guessable token rather than fall back to a weak one.
@@ -328,6 +336,12 @@ mod tests {
         let mut out = String::new();
         let _ = s.read_to_string(&mut out);
         out
+    }
+
+    #[test]
+    fn view_code_matches_relay_derivation() {
+        // Must equal packetviper-relay's expected_code() for the same key, or the room won't line up.
+        assert_eq!(super::view_code("test"), "9f86d081884c7d659a2feaa0c55ad015");
     }
 
     #[test]

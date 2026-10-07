@@ -264,19 +264,18 @@ fn sudo_user() -> Option<(u32, u32)> {
 /// phone URL for the Connect screen. No-op when the relay is disabled or has no URL.
 fn maybe_start_relay(config: &mut packetviper_core::config::Config, app: &mut App) {
     if !config.relay_enabled || config.relay_url.trim().is_empty() { return; }
-    if config.relay_code.is_empty() || config.relay_push_key.is_empty() {
-        match (server::gen_pair_code(), server::gen_pair_code()) {
-            (Some(code), Some(key)) => {
-                if config.relay_code.is_empty() { config.relay_code = code; }
-                if config.relay_push_key.is_empty() { config.relay_push_key = key; }
-                let _ = config.save();
-            }
-            _ => { log::warn!("Relay disabled: could not generate secrets"); return; }
+    // The push key is the only secret; the view code (room) is derived from it as sha256(key), so only
+    // the key holder can push and nobody can take over the room.
+    if config.relay_push_key.is_empty() {
+        match server::gen_pair_code() {
+            Some(key) => { config.relay_push_key = key; let _ = config.save(); }
+            None => { log::warn!("Relay disabled: could not generate a push key"); return; }
         }
     }
+    let code = server::view_code(&config.relay_push_key);
     let base = config.relay_url.trim_end_matches('/').to_string();
-    if server::start_relay_push(&base, &config.relay_code, &config.relay_push_key, app.server_json.clone()) {
-        app.relay_url = Some(format!("{}/r/{}", base, config.relay_code));
+    if server::start_relay_push(&base, &code, &config.relay_push_key, app.server_json.clone()) {
+        app.relay_url = Some(format!("{}/r/{}", base, code));
     }
 }
 

@@ -22,9 +22,7 @@ const ROOM_TTL: Duration = Duration::from_secs(120); // drop a room whose laptop
 const MAX_CONN: usize = 256;
 static ACTIVE: AtomicUsize = AtomicUsize::new(0);
 
-/// `push_key` is set by the first laptop to push (trust-on-first-use) and required to match on every
-/// later push, so a leaked view link (`/r/<code>`) cannot write/spoof data into the room.
-struct Room { json: String, updated: Instant, push_key: String }
+struct Room { json: String, updated: Instant }
 type Rooms = Arc<Mutex<HashMap<String, Room>>>;
 
 const DASHBOARD_HTML: &str = include_str!("../../packetviper-tui/src/dashboard.html");
@@ -76,19 +74,21 @@ fn handle(mut stream: TcpStream, rooms: Rooms) {
     // /push/<code>
     if let Some(code) = path.strip_prefix("/push/") {
         if method != "POST" || !valid_code(code) { return send(&mut stream, "400 Bad Request", "text/plain", b"bad"); }
+        // Stateless auth: the room code must equal sha256(push_key). Only the key holder can produce a
+        // matching code, and the view code (public, in the phone link) can't be reversed to the key.
+        // No stored key, so an expired room can't be taken over.
         let push_key = header(&head, "x-push-key").unwrap_or_default();
-        if push_key.len() < 8 { return send(&mut stream, "401 Unauthorized", "text/plain", b"missing X-Push-Key"); }
+        if push_key.len() < 8 || !ct_eq(&expected_code(&push_key), code) {
+            return send(&mut stream, "403 Forbidden", "text/plain", b"bad push key");
+        }
         let body = read_body(&mut stream, &head, &buf[..n]);
         if body.len() > MAX_BODY { return send(&mut stream, "413 Payload Too Large", "text/plain", b"too big"); }
         if let Ok(mut map) = rooms.lock() {
             prune(&mut map);
-            match map.get(code) {
-                // Existing room: the push key must match the one that created it.
-                Some(r) if r.push_key != push_key => return send(&mut stream, "403 Forbidden", "text/plain", b"wrong push key"),
-                None if map.len() >= MAX_ROOMS => return send(&mut stream, "503 Service Unavailable", "text/plain", b"relay full"),
-                _ => {}
+            if !map.contains_key(code) && map.len() >= MAX_ROOMS {
+                return send(&mut stream, "503 Service Unavailable", "text/plain", b"relay full");
             }
-            map.insert(code.to_string(), Room { json: body, updated: Instant::now(), push_key });
+            map.insert(code.to_string(), Room { json: body, updated: Instant::now() });
         }
         return send(&mut stream, "200 OK", "application/json", b"{\"ok\":true}");
     }
@@ -149,6 +149,19 @@ fn read_body(stream: &mut TcpStream, head: &str, first: &[u8]) -> String {
     String::from_utf8_lossy(&body).into_owned()
 }
 
+/// The room/view code a given push key is allowed to write: first 16 bytes of SHA-256, hex (32 chars).
+fn expected_code(push_key: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let h = Sha256::digest(push_key.as_bytes());
+    h[..16].iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+/// Constant-time string compare, so push-key verification doesn't leak via timing.
+fn ct_eq(a: &str, b: &str) -> bool {
+    if a.len() != b.len() { return false; }
+    a.bytes().zip(b.bytes()).fold(0u8, |d, (x, y)| d | (x ^ y)) == 0
+}
+
 /// Pair code: 8–64 URL-safe chars. Keeps room keys clean and unguessable (the laptop generates it).
 fn valid_code(c: &str) -> bool {
     (8..=64).contains(&c.len()) && c.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
@@ -176,5 +189,20 @@ mod tests {
         assert!(!super::valid_code("short"));
         assert!(!super::valid_code("has/slash1"));
         assert!(!super::valid_code("has space1"));
+    }
+
+    #[test]
+    fn code_derived_from_push_key() {
+        // sha256("test") = 9f86d081884c7d659a2feaa0c55ad015...; first 16 bytes = 32 hex chars.
+        // The laptop (tui crate) derives the same way, so they agree on the room.
+        assert_eq!(super::expected_code("test"), "9f86d081884c7d659a2feaa0c55ad015");
+        assert_ne!(super::expected_code("key-a"), super::expected_code("key-b"));
+    }
+
+    #[test]
+    fn ct_eq_works() {
+        assert!(super::ct_eq("abc", "abc"));
+        assert!(!super::ct_eq("abc", "abd"));
+        assert!(!super::ct_eq("abc", "abcd"));
     }
 }

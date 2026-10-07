@@ -10,5 +10,6 @@ description = "Tiny relay server so PacketViper alerts reach your phone anywhere
 name = "packetviper-relay"
 path = "src/main.rs"
 
-# Intentionally dependency-free (std only): small, easy to audit, trivial to deploy on a free VPS.
+# Minimal: std plus sha2 only (for stateless room auth — never hand-roll crypto). Easy to deploy.
 [dependencies]
+sha2 = "0.10"
