@@ -92,7 +92,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     app.threat_detector.probe_firewall();
     if config.http_enabled {
-        app.server = server::start(config.http_port, app.server_json.clone());
+        let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
+        app.cmd_rx = Some(cmd_rx);
+        app.server = server::start(config.http_port, app.server_json.clone(), cmd_tx);
     }
     if let Some(session_path) = args.get(2) {
         app.load_session(session_path);
@@ -192,6 +194,7 @@ fn run_loop(
             }
         }
 
+        app.drain_commands(); // settings changes from the phone
         app.tick();
 
         match event_handler.next()? {
@@ -314,7 +317,9 @@ fn run_serve(iface: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
 
     app.capturing = true;
     if config.http_enabled {
-        if let Some(h) = server::start(config.http_port, app.server_json.clone()) {
+        let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
+        app.cmd_rx = Some(cmd_rx);
+        if let Some(h) = server::start(config.http_port, app.server_json.clone(), cmd_tx) {
             use std::io::IsTerminal;
             if std::io::stdout().is_terminal() {
                 // Interactive run: safe to print the tokenized URL to the user's terminal.
@@ -338,6 +343,7 @@ fn run_serve(iface: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
         for packet in pkt_rx.try_iter().take(MAX_PACKETS_PER_FRAME) {
             app.add_packet(packet);
         }
+        app.drain_commands(); // settings changes from the phone
         app.tick(); // raises danger alarms + desktop notifications
         thread::sleep(std::time::Duration::from_millis(50));
     }

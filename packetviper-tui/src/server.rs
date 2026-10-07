@@ -14,6 +14,18 @@ use serde::Serialize;
 
 use crate::app::App;
 
+/// A settings change requested from the phone dashboard, applied by the main/serve loop.
+pub enum Command {
+    SetAutosave(bool),
+    SetAutoBlock(bool),
+    SetRingMb(u64),
+    Acknowledge,
+    UnblockAll,
+}
+
+/// Channel the dashboard uses to send [`Command`]s to the main loop.
+pub type CmdTx = crossbeam_channel::Sender<Command>;
+
 /// Live snapshot the dashboard renders. Rebuilt from the App each tick and shared as JSON.
 #[derive(Serialize, Clone, Default)]
 pub struct Snapshot {
@@ -111,7 +123,7 @@ impl Drop for ConnGuard {
     fn drop(&mut self) { ACTIVE_CONN.fetch_sub(1, Ordering::Relaxed); }
 }
 
-pub fn start(port: u16, shared: SharedJson) -> Option<ServerHandle> {
+pub fn start(port: u16, shared: SharedJson, cmd_tx: CmdTx) -> Option<ServerHandle> {
     let Some(token) = random_token() else {
         log::error!("Dashboard not started: secure randomness unavailable for the access token");
         return None;
@@ -145,10 +157,11 @@ pub fn start(port: u16, shared: SharedJson) -> Option<ServerHandle> {
                 let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(15)));
                 let token = token_srv.clone();
                 let shared = shared.clone();
+                let cmd_tx = cmd_tx.clone();
                 // One thread per connection; SSE connections stay open, so don't block the accept loop.
                 std::thread::spawn(move || {
                     let _guard = ConnGuard;
-                    handle_conn(stream, &token, &shared);
+                    handle_conn(stream, &token, &shared, &cmd_tx);
                 });
             }
         }
@@ -156,26 +169,42 @@ pub fn start(port: u16, shared: SharedJson) -> Option<ServerHandle> {
     Some(ServerHandle { url, running })
 }
 
-fn handle_conn(mut stream: TcpStream, token: &str, shared: &SharedJson) {
+fn handle_conn(mut stream: TcpStream, token: &str, shared: &SharedJson, cmd_tx: &CmdTx) {
     let mut buf = [0u8; 4096];
     let n = match stream.read(&mut buf) { Ok(n) => n, Err(_) => return };
     let req = String::from_utf8_lossy(&buf[..n]);
     let Some(line) = req.lines().next() else { return };
     let mut parts = line.split_whitespace();
-    let (_method, target) = (parts.next().unwrap_or(""), parts.next().unwrap_or("/"));
+    let (method, target) = (parts.next().unwrap_or(""), parts.next().unwrap_or("/"));
     let (path, query) = target.split_once('?').unwrap_or((target, ""));
     let authed = query_token(query) == token;
 
-    match path {
-        "/" => send(&mut stream, "200 OK", "text/html; charset=utf-8", DASHBOARD_HTML.as_bytes()),
-        "/api/state" if authed => {
+    match (method, path) {
+        (_, "/") => send(&mut stream, "200 OK", "text/html; charset=utf-8", DASHBOARD_HTML.as_bytes()),
+        ("GET", "/api/state") if authed => {
             let body = shared.lock().map(|s| s.clone()).unwrap_or_else(|_| "{}".into());
             send(&mut stream, "200 OK", "application/json", body.as_bytes());
         }
-        "/api/events" if authed => stream_events(stream, shared),
-        "/api/state" | "/api/events" => send(&mut stream, "401 Unauthorized", "text/plain", b"missing or wrong token"),
+        ("GET", "/api/events") if authed => return stream_events(stream, shared),
+        ("POST", "/api/config") if authed => {
+            let body = req.split("\r\n\r\n").nth(1).unwrap_or("");
+            apply_config(body, cmd_tx);
+            send(&mut stream, "200 OK", "application/json", b"{\"ok\":true}");
+        }
+        (_, "/api/state") | (_, "/api/events") | (_, "/api/config") =>
+            send(&mut stream, "401 Unauthorized", "text/plain", b"missing or wrong token"),
         _ => send(&mut stream, "404 Not Found", "text/plain", b"not found"),
     }
+}
+
+/// Parses a small JSON settings body from the phone and forwards each known change as a Command.
+fn apply_config(body: &str, cmd_tx: &CmdTx) {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(body) else { return };
+    if let Some(b) = v.get("autosave").and_then(|x| x.as_bool()) { let _ = cmd_tx.send(Command::SetAutosave(b)); }
+    if let Some(b) = v.get("auto_block").and_then(|x| x.as_bool()) { let _ = cmd_tx.send(Command::SetAutoBlock(b)); }
+    if let Some(mb) = v.get("ring_mb").and_then(|x| x.as_u64()) { let _ = cmd_tx.send(Command::SetRingMb(mb)); }
+    if v.get("acknowledge").and_then(|x| x.as_bool()) == Some(true) { let _ = cmd_tx.send(Command::Acknowledge); }
+    if v.get("unblock_all").and_then(|x| x.as_bool()) == Some(true) { let _ = cmd_tx.send(Command::UnblockAll); }
 }
 
 /// Server-Sent Events: push the current snapshot once a second until the client disconnects.
@@ -249,7 +278,8 @@ mod tests {
     fn serves_dashboard_and_guards_api() {
         let port = 39517; // fixed high port for the test
         let shared = Arc::new(Mutex::new("{\"ok\":true}".to_string()));
-        let handle = start(port, shared).expect("server should bind");
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let handle = start(port, shared, tx).expect("server should bind");
         let token = handle.url.split("t=").nth(1).unwrap().to_string();
         std::thread::sleep(std::time::Duration::from_millis(100));
 
@@ -261,6 +291,21 @@ mod tests {
 
         let ok = http_get(port, &format!("/api/state?t={}", token));
         assert!(ok.contains("200 OK") && ok.contains("\"ok\":true"), "API returns snapshot with token");
+
+        // A POST config change must reach the command channel.
+        let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let body = "{\"autosave\":true}";
+        s.write_all(format!("POST /api/config?t={} HTTP/1.1\r\nHost: x\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", token, body.len(), body).as_bytes()).unwrap();
+        let mut resp = String::new(); let _ = s.read_to_string(&mut resp);
+        assert!(resp.contains("200 OK"), "config POST accepted");
+        match rx.recv_timeout(std::time::Duration::from_secs(1)) {
+            Ok(Command::SetAutosave(true)) => {}
+            other => panic!("expected SetAutosave(true), got {}", matches!(other, Ok(_))),
+        }
+
+        // POST without token is rejected and sends no command.
+        let unauth = http_get(port, "/api/config");
+        assert!(unauth.contains("401"), "config POST blocked without token");
 
         handle.running.store(false, Ordering::SeqCst);
     }

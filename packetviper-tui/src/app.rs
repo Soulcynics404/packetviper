@@ -142,6 +142,8 @@ pub struct App {
     /// Running dashboard server (URL + token), shown on the Connect screen.
     pub server: Option<crate::server::ServerHandle>,
     pub show_connect: bool,
+    /// Receives settings changes from the phone dashboard (applied each loop by `drain_commands`).
+    pub cmd_rx: Option<crossbeam_channel::Receiver<crate::server::Command>>,
     seen_alert_id: u64,
     last_bell: Option<std::time::Instant>,
     last_notify: Option<std::time::Instant>,
@@ -191,6 +193,7 @@ impl App {
             server_json: std::sync::Arc::new(std::sync::Mutex::new("{}".to_string())),
             server: None,
             show_connect: false,
+            cmd_rx: None,
             seen_alert_id: 0,
             last_bell: None,
             last_notify: None,
@@ -372,6 +375,38 @@ impl App {
             Err(e) => { log::error!("Export failed: {}", e); self.status_message = format!("Export failed: {}", e) }
         }
     }
+    /// Applies all settings changes queued from the phone dashboard since the last call.
+    pub fn drain_commands(&mut self) {
+        let cmds: Vec<crate::server::Command> = match &self.cmd_rx {
+            Some(rx) => rx.try_iter().collect(),
+            None => return,
+        };
+        for c in cmds { self.apply_command(c); }
+    }
+
+    /// Applies a settings change requested from the phone dashboard.
+    pub fn apply_command(&mut self, cmd: crate::server::Command) {
+        use crate::server::Command;
+        match cmd {
+            Command::SetAutosave(on) => self.set_autosave(on),
+            Command::SetAutoBlock(on) => self.set_auto_block(on),
+            Command::SetRingMb(mb) => self.set_ring_size_mb(mb),
+            Command::Acknowledge => self.acknowledge_alarm(),
+            Command::UnblockAll => self.unblock_all(),
+        }
+    }
+
+    /// Sets capture-to-disk to a specific state (used by remote control); no-op if already there.
+    pub fn set_autosave(&mut self, on: bool) {
+        use std::sync::atomic::Ordering;
+        if self.autosave_flag.load(Ordering::Relaxed) != on { self.toggle_autosave(); }
+    }
+
+    /// Sets auto-defence to a specific state (used by remote control); no-op if already there.
+    pub fn set_auto_block(&mut self, on: bool) {
+        if self.threat_detector.auto_block != on { self.toggle_auto_block(); }
+    }
+
     /// Turns capture-to-disk on/off at runtime and saves the choice to the config file.
     pub fn toggle_autosave(&mut self) {
         use std::sync::atomic::Ordering;

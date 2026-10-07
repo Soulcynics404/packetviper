@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#000000">
 <title>PacketViper</title>
 <style>
-  :root { --bg:#000; --fg:#e8e8e8; --dim:#888; --ok:#19c37d; --warn:#f5a623; --bad:#ff3b30; --card:#0d0d0d; --line:#1c1c1c; --accent:#2aa6c9; }
+  :root { --bg:#000; --fg:#e8e8e8; --dim:#9a9a9a; --ok:#19c37d; --warn:#f5a623; --bad:#cc0000; --bad-text:#ff6b6b; --card:#0d0d0d; --line:#1c1c1c; --accent:#2aa6c9; }
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.45 -apple-system,Segoe UI,Roboto,sans-serif; padding:0 14px 40px; }
   header { position:sticky; top:0; background:var(--bg); padding:14px 0 8px; display:flex; align-items:center; gap:8px; }
@@ -15,7 +15,7 @@
   #banner { border-radius:14px; padding:20px 16px; text-align:center; margin:8px 0 14px; font-weight:700; }
   #banner.safe { background:#06281c; color:var(--ok); border:1px solid #0c4a34; }
   #banner.danger { background:var(--bad); color:#fff; animation:flash .7s steps(1,end) infinite; }
-  @keyframes flash { 50% { background:#2a0806; color:var(--bad); } }
+  @keyframes flash { 50% { background:#2a0806; color:var(--bad-text); } }
   #banner .big { font-size:26px; display:block; margin-bottom:4px; }
   .grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px; }
   .stat { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; }
@@ -29,6 +29,13 @@
   .empty { color:var(--dim); text-align:center; padding:16px; }
   .bar { display:flex; justify-content:space-between; font-variant-numeric:tabular-nums; }
   .up { color:var(--warn); } .down { color:var(--accent); }
+  #controls { display:flex; flex-direction:column; gap:8px; }
+  .ctl { background:var(--card); border:1px solid var(--line); color:var(--fg); border-radius:10px; padding:12px; font:inherit; text-align:left; }
+  .ctl:active { background:#161616; } .ctl.on { border-color:var(--ok); color:var(--ok); } .danger-btn { color:var(--bad-text); border-color:#3a1210; }
+  #btnAck { background:var(--bad); color:#fff; border:none; font-weight:700; text-align:center; }
+  .ring { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px; display:flex; align-items:center; gap:10px; }
+  .step { width:36px; height:32px; border-radius:8px; border:1px solid var(--line); background:#161616; color:var(--fg); font-size:18px; }
+  #ringv { flex:1; text-align:center; font-weight:700; }
   #off { position:fixed; inset:0; background:var(--bg); display:flex; align-items:center; justify-content:center; text-align:center; padding:24px; color:var(--dim); }
 </style>
 </head>
@@ -52,6 +59,15 @@
 
 <h2>Active protections</h2>
 <div id="blocks"><div class="empty">None</div></div>
+
+<h2>Controls</h2>
+<div id="controls">
+  <button class="ctl" id="btnAck" style="display:none">⚠ Acknowledge alarm</button>
+  <button class="ctl" id="btnSave">Autosave: —</button>
+  <button class="ctl" id="btnDef">Auto-defence: —</button>
+  <div class="ring">Ring buffer: <button class="step" data-d="-256">−</button> <span id="ringv">—</span> <button class="step" data-d="256">+</button></div>
+  <button class="ctl danger-btn" id="btnUnblock">Remove all blocks</button>
+</div>
 
 <div id="off" style="display:none">Disconnected from PacketViper.<br>Make sure your laptop is on and you're on the same Wi-Fi, then reload.</div>
 
@@ -106,8 +122,24 @@ function render(s){
   $('blocks').innerHTML = (s.blocks&&s.blocks.length)
     ? s.blocks.map(x=>`<div class="row"><div class="t">${esc(x.target)} <span class="muted">(${x.kind})</span></div><div class="s">${esc(x.reason)}</div></div>`).join('')
     : '<div class="empty">None</div>';
+
+  window._s = s; // latest state for the control buttons
+  $('btnSave').textContent = 'Autosave to disk: '+(s.autosave?'ON':'OFF'); $('btnSave').classList.toggle('on', !!s.autosave);
+  $('btnDef').textContent = 'Auto-defence: '+(s.auto_block?'ON':'OFF'); $('btnDef').classList.toggle('on', !!s.auto_block);
+  $('ringv').textContent = (s.ring_mb||0)+' MB';
+  $('btnAck').style.display = s.danger?'block':'none';
 }
 function esc(x){ return String(x==null?'':x).replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])); }
+
+function post(o){ fetch('/api/config?t='+encodeURIComponent(T),{method:'POST',body:JSON.stringify(o)}).catch(()=>{}); }
+$('btnSave').onclick = () => post({autosave: !(window._s && window._s.autosave)});
+$('btnDef').onclick  = () => post({auto_block: !(window._s && window._s.auto_block)});
+$('btnUnblock').onclick = () => post({unblock_all:true});
+$('btnAck').onclick = () => post({acknowledge:true});
+document.querySelectorAll('.step').forEach(b => b.onclick = () => {
+  const cur = (window._s && window._s.ring_mb) || 1024;
+  post({ring_mb: Math.max(16, cur + (+b.dataset.d))});
+});
 
 function connect(){
   const es = new EventSource('/api/events?t='+encodeURIComponent(T));
