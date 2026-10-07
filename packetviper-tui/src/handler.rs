@@ -52,6 +52,7 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Char('A') => app.toggle_auto_block(),
         KeyCode::Char('w') => app.toggle_autosave(),
+        KeyCode::Char('o') => app.show_connect = !app.show_connect,
         KeyCode::Char(']') => { let mb = app.config.ring_buffer_mb + 256; app.set_ring_size_mb(mb); }
         KeyCode::Char('[') => { let mb = app.config.ring_buffer_mb.saturating_sub(256).max(16); app.set_ring_size_mb(mb); }
         KeyCode::Char(' ') => app.acknowledge_alarm(),

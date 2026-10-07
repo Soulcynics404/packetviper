@@ -15,6 +15,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
         )),
         Line::from("   Tab / Shift+Tab    Switch between tabs (also ← / →)"),
         Line::from("   Ctrl+L             Redraw the screen"),
+        Line::from("   o                  Connect a phone/device (shows dashboard link)"),
         Line::from("   j / ↓              Scroll down"),
         Line::from("   k / ↑              Scroll up"),
         Line::from("   g                  Go to first packet"),

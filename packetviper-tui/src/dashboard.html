@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>PacketViper</title>
+<style>
+  :root { --bg:#000; --fg:#e8e8e8; --dim:#888; --ok:#19c37d; --warn:#f5a623; --bad:#ff3b30; --card:#0d0d0d; --line:#1c1c1c; --accent:#2aa6c9; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.45 -apple-system,Segoe UI,Roboto,sans-serif; padding:0 14px 40px; }
+  header { position:sticky; top:0; background:var(--bg); padding:14px 0 8px; display:flex; align-items:center; gap:8px; }
+  header b { font-size:17px; } .dot { width:9px;height:9px;border-radius:50%;background:var(--dim); }
+  .dot.live { background:var(--ok); } .muted { color:var(--dim); font-size:13px; }
+  #banner { border-radius:14px; padding:20px 16px; text-align:center; margin:8px 0 14px; font-weight:700; }
+  #banner.safe { background:#06281c; color:var(--ok); border:1px solid #0c4a34; }
+  #banner.danger { background:var(--bad); color:#fff; animation:flash .7s steps(1,end) infinite; }
+  @keyframes flash { 50% { background:#2a0806; color:var(--bad); } }
+  #banner .big { font-size:26px; display:block; margin-bottom:4px; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px; }
+  .stat { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; }
+  .stat .k { color:var(--dim); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+  .stat .v { font-size:20px; font-weight:700; margin-top:3px; } .stat .v small { font-size:12px; color:var(--dim); font-weight:400; }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:var(--dim); margin:18px 0 8px; }
+  .row { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin-bottom:7px; }
+  .row .t { font-weight:600; } .row .s { color:var(--dim); font-size:13px; margin-top:2px; }
+  .lvl { font-size:11px; font-weight:700; padding:2px 7px; border-radius:6px; margin-right:6px; }
+  .CRITICAL,.HIGH { background:var(--bad); color:#fff; } .MEDIUM { background:var(--warn); color:#000; } .LOW,.INFO { background:#2a3b44; color:#cfe; }
+  .empty { color:var(--dim); text-align:center; padding:16px; }
+  .bar { display:flex; justify-content:space-between; font-variant-numeric:tabular-nums; }
+  .up { color:var(--warn); } .down { color:var(--accent); }
+  #off { position:fixed; inset:0; background:var(--bg); display:flex; align-items:center; justify-content:center; text-align:center; padding:24px; color:var(--dim); }
+</style>
+</head>
+<body>
+<header><span class="dot" id="dot"></span><b>PacketViper</b><span class="muted" id="iface"></span><span style="flex:1"></span><span class="muted" id="clock"></span></header>
+
+<div id="banner" class="safe"><span class="big">✓ Network Safe</span><span id="bannerSub">No active threats</span></div>
+
+<div class="grid">
+  <div class="stat"><div class="k">Download</div><div class="v down" id="down">—</div></div>
+  <div class="stat"><div class="k">Upload</div><div class="v up" id="up">—</div></div>
+  <div class="stat"><div class="k">Packets</div><div class="v" id="pkts">—</div></div>
+  <div class="stat"><div class="k">Alerts</div><div class="v" id="alerts">—</div></div>
+</div>
+
+<h2>Top uploaders (which app is sending)</h2>
+<div id="uploaders"><div class="empty">—</div></div>
+
+<h2>Recent alerts</h2>
+<div id="alertList"><div class="empty">—</div></div>
+
+<h2>Active protections</h2>
+<div id="blocks"><div class="empty">None</div></div>
+
+<div id="off" style="display:none">Disconnected from PacketViper.<br>Make sure your laptop is on and you're on the same Wi-Fi, then reload.</div>
+
+<script>
+const T = new URLSearchParams(location.search).get('t') || '';
+const $ = id => document.getElementById(id);
+const bytes = n => { n=+n||0; const u=['B','KB','MB','GB','TB']; let i=0; while(n>=1024&&i<u.length-1){n/=1024;i++;} return n.toFixed(i?1:0)+' '+u[i]; };
+let ctx, lastBeep=0, wasDanger=false;
+
+function beep(){ // short alarm tone; also vibrate
+  try { navigator.vibrate && navigator.vibrate([200,100,200]); } catch(e){}
+  try { ctx = ctx || new (window.AudioContext||window.webkitAudioContext)();
+    const o=ctx.createOscillator(), g=ctx.createGain();
+    o.connect(g); g.connect(ctx.destination); o.type='square'; o.frequency.value=880;
+    g.gain.setValueAtTime(0.0001,ctx.currentTime); g.gain.exponentialRampToValueAtTime(0.3,ctx.currentTime+0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001,ctx.currentTime+0.5);
+    o.start(); o.stop(ctx.currentTime+0.5);
+  } catch(e){}
+}
+
+function render(s){
+  $('off').style.display='none';
+  $('dot').className = 'dot' + (s.capturing?' live':'');
+  $('iface').textContent = s.interface ? ('· '+s.interface) : '';
+  $('clock').textContent = new Date().toLocaleTimeString();
+  $('down').innerHTML = bytes(s.down_rate)+'<small>/s</small>';
+  $('up').innerHTML = bytes(s.up_rate)+'<small>/s · peak '+bytes(s.peak_up)+'</small>';
+  $('pkts').innerHTML = (s.total_packets||0).toLocaleString()+'<small> · '+bytes(s.total_bytes)+'</small>';
+  $('alerts').innerHTML = (s.alert_count||0)+'<small> · '+(s.critical_count||0)+' high</small>';
+
+  const b=$('banner');
+  if(s.danger){
+    b.className='danger';
+    b.querySelector('.big').textContent = s.danger_critical ? '⚠ DANGER' : '⚠ WARNING';
+    $('bannerSub').textContent = s.danger_text || 'Threat detected';
+    if(!wasDanger || Date.now()-lastBeep>5000){ beep(); lastBeep=Date.now(); }
+    wasDanger=true;
+  } else {
+    b.className='safe'; b.querySelector('.big').textContent='✓ Network Safe';
+    $('bannerSub').textContent = s.auto_block ? 'Auto-defence ON' : 'No active threats';
+    wasDanger=false;
+  }
+
+  $('uploaders').innerHTML = (s.uploaders&&s.uploaders.length)
+    ? s.uploaders.map(u=>`<div class="row"><div class="bar"><span class="t">${esc(u.name)}</span><span class="up">▲ ${bytes(u.up)}</span></div><div class="s">pid ${u.pid} · ▼ ${bytes(u.down)} · ${u.dests} internet dst</div></div>`).join('')
+    : '<div class="empty">Per-app data needs Linux + root</div>';
+
+  $('alertList').innerHTML = (s.alerts&&s.alerts.length)
+    ? s.alerts.map(a=>`<div class="row"><div class="t"><span class="lvl ${a.level}">${a.level}</span>${esc(a.category)}</div><div class="s">${a.time} · ${esc(a.description)}</div></div>`).join('')
+    : '<div class="empty">No threats detected</div>';
+
+  $('blocks').innerHTML = (s.blocks&&s.blocks.length)
+    ? s.blocks.map(x=>`<div class="row"><div class="t">${esc(x.target)} <span class="muted">(${x.kind})</span></div><div class="s">${esc(x.reason)}</div></div>`).join('')
+    : '<div class="empty">None</div>';
+}
+function esc(x){ return String(x==null?'':x).replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])); }
+
+function connect(){
+  const es = new EventSource('/api/events?t='+encodeURIComponent(T));
+  es.onmessage = e => { try { render(JSON.parse(e.data)); } catch(err){} };
+  es.onerror = () => { $('off').style.display='flex'; es.close(); setTimeout(connect, 3000); };
+}
+connect();
+</script>
+</body>
+</html>

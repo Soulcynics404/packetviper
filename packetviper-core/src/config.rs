@@ -20,6 +20,10 @@ pub struct Config {
     pub ring_buffer_mb: u64,
     /// Automatically block/defend against detected attackers (off by default).
     pub auto_block: bool,
+    /// Serve the phone/web dashboard on the LAN (on by default; access needs the per-run token).
+    pub http_enabled: bool,
+    /// Port for the dashboard server.
+    pub http_port: u16,
 }
 
 impl Default for Config {
@@ -29,6 +33,8 @@ impl Default for Config {
             capture_dir: "captures".to_string(),
             ring_buffer_mb: 1024, // 1 GB default; the user can change it
             auto_block: false,
+            http_enabled: true,
+            http_port: 7373,
         }
     }
 }

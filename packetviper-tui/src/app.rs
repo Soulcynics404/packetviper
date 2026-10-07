@@ -137,6 +137,11 @@ pub struct App {
     pub alarm: Option<Alarm>,
     pub config: packetviper_core::config::Config,
     pub autosave_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Live JSON snapshot the dashboard server serves; refreshed each tick.
+    pub server_json: crate::server::SharedJson,
+    /// Running dashboard server (URL + token), shown on the Connect screen.
+    pub server: Option<crate::server::ServerHandle>,
+    pub show_connect: bool,
     seen_alert_id: u64,
     last_bell: Option<std::time::Instant>,
     last_notify: Option<std::time::Instant>,
@@ -183,6 +188,9 @@ impl App {
             alarm: None,
             config: packetviper_core::config::Config::default(),
             autosave_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            server_json: std::sync::Arc::new(std::sync::Mutex::new("{}".to_string())),
+            server: None,
+            show_connect: false,
             seen_alert_id: 0,
             last_bell: None,
             last_notify: None,
@@ -266,6 +274,14 @@ impl App {
     pub fn tick(&mut self) {
         self.bandwidth_monitor.tick();
         self.check_new_alerts();
+        self.refresh_dashboard();
+    }
+
+    /// Rebuilds the JSON snapshot the phone dashboard reads.
+    fn refresh_dashboard(&mut self) {
+        if let Ok(js) = serde_json::to_string(&crate::server::Snapshot::from_app(self)) {
+            if let Ok(mut g) = self.server_json.lock() { *g = js; }
+        }
     }
 
     /// Raises (or updates) the danger banner for new High/Critical alerts and sends a desktop notification.

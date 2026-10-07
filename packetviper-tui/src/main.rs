@@ -1,8 +1,9 @@
-mod theme; 
+mod theme;
 mod app;
 mod events;
 mod handler;
 mod ui;
+mod server;
 
 use std::io;
 use std::thread;
@@ -90,6 +91,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         None => log::warn!("No default gateway found on {}: gateway-spoofing and MITM-relay detection are off", interface_name),
     }
     app.threat_detector.probe_firewall();
+    if config.http_enabled {
+        app.server = server::start(config.http_port, app.server_json.clone());
+    }
     if let Some(session_path) = args.get(2) {
         app.load_session(session_path);
     }
@@ -133,6 +137,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|_| Err("PacketViper crashed (panic); see log".into()));
 
     running_flag.store(false, std::sync::atomic::Ordering::SeqCst);
+    if let Some(s) = &app.server { s.running.store(false, std::sync::atomic::Ordering::SeqCst); }
     if let Err(e) = &result {
         log::error!("Main loop error: {}", e);
     }
@@ -292,6 +297,12 @@ fn run_serve(iface: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
     });
 
     app.capturing = true;
+    if config.http_enabled {
+        if let Some(h) = server::start(config.http_port, app.server_json.clone()) {
+            println!("Dashboard: open on your phone (same Wi-Fi):\n   {}", h.url);
+            app.server = Some(h);
+        }
+    }
     log::info!("serve: monitoring {} in the background (auto-defence={}, autosave={})", iface, config.auto_block, config.autosave);
 
     // Stop cleanly on Ctrl-C / SIGTERM so firewall rules are removed and the capture file is flushed.

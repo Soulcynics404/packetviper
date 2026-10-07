@@ -79,7 +79,7 @@ pub fn render(f: &mut Frame, app: &App) {
         Span::styled(if autosave_on { "[● REC] " } else { "" }, Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
         Span::styled(format!("| {} | ", app.status_message), Style::default().fg(app.theme.accent3)),
         Span::raw(format!("Theme: {} | ", app.theme.name.name())),
-        Span::raw(" [←/→] Tabs | [c] capture/pause | [w] autosave | [?] Help | [q]uit"),
+        Span::raw(" [←/→] Tabs | [c] cap | [w] save | [o] phone | [?] Help | [q]uit"),
     ];
     let footer = Paragraph::new(Line::from(footer_text)).block(Block::default().borders(Borders::TOP));
     f.render_widget(footer, chunks[2]);
@@ -88,9 +88,32 @@ pub fn render(f: &mut Frame, app: &App) {
         render_alarm(f, chunks[1], alarm);
     }
 
+    if app.show_connect {
+        render_connect(f, size, app);
+    }
+
     if let Some(Confirm::KillInterface) = app.pending_confirm {
         render_confirm(f, size, &format!("Take interface '{}' DOWN?\n\nThis disconnects this machine from the network until you run:\n  sudo ip link set dev {} up\n\n[y] yes    any other key: cancel", app.interface, app.interface));
     }
+}
+
+/// "See on another device" popup: the LAN URL (with token) to open PacketViper on a phone.
+fn render_connect(f: &mut Frame, area: Rect, app: &App) {
+    let w = area.width.min(74);
+    let h = area.height.min(12);
+    let popup = Rect::new(area.x + (area.width - w) / 2, area.y + (area.height - h) / 2, w, h);
+    f.render_widget(Clear, popup);
+    let body = match &app.server {
+        Some(s) => format!(
+            "Open this on your phone or another device (same Wi-Fi):\n\n  {}\n\nAnyone with this link can view your monitor, so share only via\nthe QR/link. The token changes each run.\n\n[o] close",
+            s.url
+        ),
+        None => "Dashboard server is not running.\nEnable it in packetviper-config.json (\"http_enabled\": true) and restart.\n\n[o] close".to_string(),
+    };
+    let p = Paragraph::new(body)
+        .wrap(Wrap { trim: false })
+        .block(Block::default().title(" 📱 Connect a device ").borders(Borders::ALL).border_style(Style::default().fg(app.theme.accent1).add_modifier(Modifier::BOLD)));
+    f.render_widget(p, popup);
 }
 
 fn render_confirm(f: &mut Frame, area: Rect, text: &str) {
