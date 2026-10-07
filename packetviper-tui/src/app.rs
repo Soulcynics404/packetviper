@@ -425,6 +425,8 @@ impl App {
     /// Sets the ring-buffer cap in MB and saves it. Takes effect for new segments immediately; the
     /// running writer enforces the new cap as it rotates.
     pub fn set_ring_size_mb(&mut self, mb: u64) {
+        use packetviper_core::config::Config;
+        let mb = mb.clamp(Config::MIN_RING_MB, Config::MAX_RING_MB); // guard overflow / nonsense from remote
         self.config.ring_buffer_mb = mb;
         let _ = self.config.save();
         self.status_message = format!("Ring buffer size set to {} MB (restart to resize the open file)", mb);

@@ -24,6 +24,10 @@ pub struct Config {
     pub http_enabled: bool,
     /// Port for the dashboard server.
     pub http_port: u16,
+    /// Allow the phone dashboard to CHANGE settings (autosave, defence, ring size). When false the
+    /// dashboard is read-only. On by default because remote control was requested; note the dashboard
+    /// is plain HTTP on the LAN, so anyone who captures the token could change settings.
+    pub http_allow_control: bool,
 }
 
 impl Default for Config {
@@ -35,11 +39,16 @@ impl Default for Config {
             auto_block: false,
             http_enabled: true,
             http_port: 7373,
+            http_allow_control: true,
         }
     }
 }
 
 impl Config {
+    /// Clamp for the ring size in MB: at least 16 MB, at most 1 TB (guards overflow and nonsense input).
+    pub const MIN_RING_MB: u64 = 16;
+    pub const MAX_RING_MB: u64 = 1_048_576;
+
     /// The config file path: `$PACKETVIPER_CONFIG` or `packetviper-config.json` in the working dir.
     pub fn path() -> PathBuf {
         std::env::var_os("PACKETVIPER_CONFIG")
@@ -85,9 +94,10 @@ impl Config {
         if unsafe_path { "captures".to_string() } else { d.clone() }
     }
 
-    /// Ring-buffer cap in bytes, never below 16 MB (a smaller ring can't hold even one segment).
+    /// Ring-buffer cap in bytes, clamped to [MIN_RING_MB, MAX_RING_MB] with saturating math so a huge
+    /// configured/remote value can't overflow.
     pub fn ring_bytes(&self) -> u64 {
-        self.ring_buffer_mb.max(16) * MB
+        self.ring_buffer_mb.clamp(Self::MIN_RING_MB, Self::MAX_RING_MB).saturating_mul(MB)
     }
 }
 

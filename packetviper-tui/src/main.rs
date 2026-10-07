@@ -94,7 +94,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if config.http_enabled {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
         app.cmd_rx = Some(cmd_rx);
-        app.server = server::start(config.http_port, app.server_json.clone(), cmd_tx);
+        app.server = server::start(config.http_port, app.server_json.clone(), cmd_tx, config.http_allow_control);
     }
     if let Some(session_path) = args.get(2) {
         app.load_session(session_path);
@@ -319,7 +319,7 @@ fn run_serve(iface: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
     if config.http_enabled {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
         app.cmd_rx = Some(cmd_rx);
-        if let Some(h) = server::start(config.http_port, app.server_json.clone(), cmd_tx) {
+        if let Some(h) = server::start(config.http_port, app.server_json.clone(), cmd_tx, config.http_allow_control) {
             use std::io::IsTerminal;
             if std::io::stdout().is_terminal() {
                 // Interactive run: safe to print the tokenized URL to the user's terminal.

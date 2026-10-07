@@ -123,7 +123,7 @@ impl Drop for ConnGuard {
     fn drop(&mut self) { ACTIVE_CONN.fetch_sub(1, Ordering::Relaxed); }
 }
 
-pub fn start(port: u16, shared: SharedJson, cmd_tx: CmdTx) -> Option<ServerHandle> {
+pub fn start(port: u16, shared: SharedJson, cmd_tx: CmdTx, allow_control: bool) -> Option<ServerHandle> {
     let Some(token) = random_token() else {
         log::error!("Dashboard not started: secure randomness unavailable for the access token");
         return None;
@@ -161,7 +161,7 @@ pub fn start(port: u16, shared: SharedJson, cmd_tx: CmdTx) -> Option<ServerHandl
                 // One thread per connection; SSE connections stay open, so don't block the accept loop.
                 std::thread::spawn(move || {
                     let _guard = ConnGuard;
-                    handle_conn(stream, &token, &shared, &cmd_tx);
+                    handle_conn(stream, &token, &shared, &cmd_tx, allow_control);
                 });
             }
         }
@@ -169,7 +169,7 @@ pub fn start(port: u16, shared: SharedJson, cmd_tx: CmdTx) -> Option<ServerHandl
     Some(ServerHandle { url, running })
 }
 
-fn handle_conn(mut stream: TcpStream, token: &str, shared: &SharedJson, cmd_tx: &CmdTx) {
+fn handle_conn(mut stream: TcpStream, token: &str, shared: &SharedJson, cmd_tx: &CmdTx, allow_control: bool) {
     let mut buf = [0u8; 4096];
     let n = match stream.read(&mut buf) { Ok(n) => n, Err(_) => return };
     let req = String::from_utf8_lossy(&buf[..n]);
@@ -186,11 +186,12 @@ fn handle_conn(mut stream: TcpStream, token: &str, shared: &SharedJson, cmd_tx: 
             send(&mut stream, "200 OK", "application/json", body.as_bytes());
         }
         ("GET", "/api/events") if authed => return stream_events(stream, shared),
-        ("POST", "/api/config") if authed => {
+        ("POST", "/api/config") if authed && allow_control => {
             let body = req.split("\r\n\r\n").nth(1).unwrap_or("");
             apply_config(body, cmd_tx);
             send(&mut stream, "200 OK", "application/json", b"{\"ok\":true}");
         }
+        ("POST", "/api/config") if authed => send(&mut stream, "403 Forbidden", "application/json", b"{\"error\":\"control disabled (read-only dashboard)\"}"),
         (_, "/api/state") | (_, "/api/events") | (_, "/api/config") =>
             send(&mut stream, "401 Unauthorized", "text/plain", b"missing or wrong token"),
         _ => send(&mut stream, "404 Not Found", "text/plain", b"not found"),
@@ -279,7 +280,7 @@ mod tests {
         let port = 39517; // fixed high port for the test
         let shared = Arc::new(Mutex::new("{\"ok\":true}".to_string()));
         let (tx, rx) = crossbeam_channel::unbounded();
-        let handle = start(port, shared, tx).expect("server should bind");
+        let handle = start(port, shared, tx, true).expect("server should bind");
         let token = handle.url.split("t=").nth(1).unwrap().to_string();
         std::thread::sleep(std::time::Duration::from_millis(100));
 
