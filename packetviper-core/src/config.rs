@@ -52,10 +52,31 @@ impl Config {
         }
     }
 
-    /// Writes the config back to disk (pretty JSON).
+    /// Writes the config back to disk (pretty JSON), owner-readable only. Refuses to write through a
+    /// symlink, since we may run as root and the file sits in the working directory.
     pub fn save(&self) -> std::io::Result<()> {
+        let path = Self::path();
+        if std::fs::symlink_metadata(&path).map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+            return Err(std::io::Error::new(std::io::ErrorKind::Other, "config path is a symlink; refusing to write"));
+        }
         let json = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
-        std::fs::write(Self::path(), json)
+        std::fs::write(&path, json)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        }
+        Ok(())
+    }
+
+    /// Capture directory limited to a safe relative path. A planted config can't point captures at a
+    /// system location (absolute or containing `..`); such values fall back to the default.
+    pub fn sanitized_capture_dir(&self) -> String {
+        let d = &self.capture_dir;
+        let unsafe_path = d.is_empty()
+            || std::path::Path::new(d).is_absolute()
+            || d.split(['/', '\\']).any(|p| p == "..");
+        if unsafe_path { "captures".to_string() } else { d.clone() }
     }
 
     /// Ring-buffer cap in bytes, never below 16 MB (a smaller ring can't hold even one segment).

@@ -97,12 +97,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (pkt_tx, pkt_rx) = bounded(10000);
     let mut engine = CaptureEngine::new(&interface_name);
     // Open the rolling capture file so autosave can be toggled on/off live; writes only happen when on.
-    match packetviper_core::capture::ring::RingWriter::new(&config.capture_dir, config.ring_bytes()) {
+    let capture_dir = config.sanitized_capture_dir();
+    match packetviper_core::capture::ring::RingWriter::new(&capture_dir, config.ring_bytes()) {
         Ok(ring) => {
             engine = engine.with_autosave(ring, autosave_flag.clone());
-            log::info!("Autosave ready: dir={} cap={} MB, enabled={}", config.capture_dir, config.ring_buffer_mb, config.autosave);
+            log::info!("Autosave ready: dir={} cap={} MB, enabled={}", capture_dir, config.ring_buffer_mb, config.autosave);
         }
-        Err(e) => log::warn!("Autosave unavailable (cannot open capture dir '{}'): {}", config.capture_dir, e),
+        Err(e) => log::warn!("Autosave unavailable (cannot open capture dir '{}'): {}", capture_dir, e),
     }
     let running_flag = engine.get_running_flag();
     let capture_thread = thread::spawn(move || {

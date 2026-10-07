@@ -30,9 +30,19 @@ pub struct RingWriter {
 
 impl RingWriter {
     /// Opens a fresh capture directory and first segment. `max_bytes` is the total on-disk cap.
+    ///
+    /// We may run as root, so the directory must not be a symlink (it could redirect writes to a
+    /// system path), and each segment is created with O_EXCL so a pre-planted symlink is never followed.
     pub fn new(dir: &str, max_bytes: u64) -> std::io::Result<Self> {
         let dir = PathBuf::from(dir);
-        std::fs::create_dir_all(&dir)?;
+        match std::fs::symlink_metadata(&dir) {
+            Ok(m) if m.file_type().is_symlink() =>
+                return Err(std::io::Error::new(std::io::ErrorKind::Other, "capture dir is a symlink; refusing")),
+            Ok(m) if !m.is_dir() =>
+                return Err(std::io::Error::new(std::io::ErrorKind::Other, "capture path exists and is not a directory")),
+            Ok(_) => {}
+            Err(_) => std::fs::create_dir_all(&dir)?,
+        }
         let path = dir.join(format!("packetviper_capture_{:06}.pcap", 1));
         let writer = new_segment(&path)?;
         let mut segments = VecDeque::new();
@@ -100,9 +110,10 @@ impl RingWriter {
     pub fn segment_count(&self) -> usize { self.segments.len() }
 }
 
-/// Creates a new pcap segment file with its global header written.
+/// Creates a new pcap segment file with its global header written. `create_new` (O_EXCL) means an
+/// existing file or symlink at this path is never opened/followed — important when running as root.
 fn new_segment(path: &std::path::Path) -> std::io::Result<BufWriter<File>> {
-    let mut f = BufWriter::new(File::create(path)?);
+    let mut f = BufWriter::new(std::fs::OpenOptions::new().write(true).create_new(true).open(path)?);
     f.write_all(&PCAP_MAGIC)?;
     f.flush()?;
     Ok(f)
