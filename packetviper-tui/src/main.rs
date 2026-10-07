@@ -27,7 +27,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if args.len() < 2 {
         println!("\n  🐍 PacketViper — Network Traffic Analyzer\n");
-        println!("  Usage: sudo {} <interface> [session.json]\n", args[0]);
+        println!("  Usage: {}{} <interface> [session.json]\n", RUN_AS, args[0]);
         println!("  Available interfaces:");
         println!("  {}", "─".repeat(60));
 
@@ -41,8 +41,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if iface.is_loopback { "(lo)" } else { "" },
                 iface.ips.join(", ")
             );
+            // On Windows the name is a device path; the description says which adapter it is.
+            if !iface.description.is_empty() && iface.description != iface.name {
+                println!("    {:<15} └─ {}", "", iface.description);
+            }
         }
-        println!("\n  Example: sudo {} wlan0\n", args[0]);
+        println!("\n  Example: {}{} {}\n", RUN_AS, args[0], EXAMPLE_IFACE);
         return Ok(());
     }
 
@@ -61,7 +65,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut app = App::new(&interface_name);
     app.threat_detector.set_local_ips(interfaces.iter().flat_map(|i| i.ips.clone()));
     app.threat_detector.set_local_macs(interfaces.iter().filter_map(|i| i.mac.clone()));
-    match capture::default_gateway(&interface_name) {
+    match packetviper_core::platform::default_gateway(&interface_name) {
         Some((ip, mac)) => app.threat_detector.set_gateway(&interface_name, &ip, &mac),
         None => log::warn!("No default gateway found on {}: gateway-spoofing and MITM-relay detection are off", interface_name),
     }
@@ -173,9 +177,12 @@ fn restore_terminal() {
 /// Starts logging to logs/packetviper_<timestamp>.log (one file per run, written as events happen, so it
 /// survives a crash). Level is info unless RUST_LOG overrides it. Returns the log path.
 /// Logging never goes to stderr: that would draw over the TUI.
+/// How to launch with the needed privileges, for the usage text.
+const RUN_AS: &str = if cfg!(windows) { "(as Administrator) " } else { "sudo " };
+const EXAMPLE_IFACE: &str = if cfg!(windows) { "\\Device\\NPF_{...}" } else if cfg!(target_os = "macos") { "en0" } else { "wlan0" };
+
 fn init_logging() -> Option<String> {
     use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
     // We run as root: never follow a symlinked "logs" (it could point at a system directory we'd then chown).
     match std::fs::symlink_metadata("logs") {
         Ok(m) if m.file_type().is_symlink() || !m.is_dir() => return None,
@@ -184,7 +191,15 @@ fn init_logging() -> Option<String> {
     }
     let path = format!("logs/packetviper_{}.log", chrono::Local::now().format("%Y%m%d_%H%M%S"));
     // create_new (O_EXCL) refuses an existing file or symlink at this path.
-    let file = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path).ok()?;
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let file = opts.open(&path).ok()?;
+    #[cfg(unix)]
     if let Some((uid, gid)) = sudo_user() {
         let _ = std::os::unix::fs::lchown("logs", Some(uid), Some(gid));
         let _ = std::os::unix::fs::fchown(&file, Some(uid), Some(gid));
@@ -201,6 +216,7 @@ fn init_logging() -> Option<String> {
 }
 
 /// The user who ran sudo, so the log can be handed to them instead of staying root-owned.
+#[cfg(unix)]
 fn sudo_user() -> Option<(u32, u32)> {
     let id = |var| std::env::var(var).ok().and_then(|v| v.parse::<u32>().ok());
     Some((id("SUDO_UID")?, id("SUDO_GID")?))

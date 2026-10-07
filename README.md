@@ -104,13 +104,27 @@
 
 ### 🛡️ Threat Detection Engine
 
+High and Critical alerts raise a flashing **⚠ DANGER** banner on every tab, ring the terminal bell and send a desktop notification with sound until you press `Space`.
+
 | Threat | Detection Method | Severity |
 |--------|-----------------|----------|
-| **Port Scanning** | >15 unique destination ports from single source within 60s | 🟠 HIGH |
-| **ARP Spoofing** | Multiple MAC addresses claiming same IP via ARP Reply | 🔴 CRITICAL |
-| **DNS Tunneling** | DNS query labels >40 characters or total query >100 chars | 🟡 MEDIUM |
-| **Suspicious Ports** | Traffic to known malware ports (4444, 31337, 6667, etc.) | 🔵 LOW |
-| **DDoS Indicators** | >500 packets in 10 seconds from single source | 🟠 HIGH |
+| **Gateway spoofing (MITM)** | A MAC other than your router's claims the router's IP | 🔴 CRITICAL |
+| **MITM traffic relay** | Internet traffic reaches you from a MAC other than your router's (ARP-poisoning MITM, evil twin) | 🔴 CRITICAL |
+| **ARP spoofing** | An IP claimed by a new MAC (attacker and real MAC named in the alert) | 🟠 HIGH |
+| **ICMP redirect** | Someone trying to reroute your traffic | 🟠 HIGH |
+| **Rogue DHCP** | DHCP offers from something other than your router | 🟠 HIGH |
+| **Rogue IPv6 router / DHCPv6 (mitm6)** | New router advertisements or DHCPv6 servers | 🟠 HIGH / 🟡 MEDIUM |
+| **Access to your files / remote control** | Connection attempts to SMB, SSH, FTP, RDP, VNC, NFS, Telnet, WinRM | 🟠 HIGH |
+| **Exposed service** | Your PC answered on one of those ports | 🔴 CRITICAL |
+| **Brute force** | >10 attempts on one of those ports in 60s | 🔴 CRITICAL |
+| **Port scanning** | >15 unique destination ports from one source within 60s | 🟠 HIGH |
+| **SYN/ICMP flood** | >200 new connection attempts in 10s from one source (downloads don't count) | 🟠 HIGH |
+| **Name poisoning (Responder)** | LLMNR / NetBIOS name answers sent to you | 🟡 MEDIUM |
+| **MAC flooding** | >100 different MACs within 10s | 🟡 MEDIUM |
+| **DNS tunneling** | DNS query labels >40 characters or total query >100 chars | 🟡 MEDIUM |
+| **Suspicious ports** | Traffic to known backdoor ports (4444, 31337, 6667, etc.) | 🔵 LOW |
+
+**Auto-defence** (off by default, toggle with `A`): pins your router's real MAC so you can't be ARP-poisoned, blocks the attacker's MAC (Linux), and blocks public IPs behind floods, scans and brute force. Your own MAC and the router's real MAC are never blocked, and every protection is removed when PacketViper exits. See the **Firewall** tab for what is active.
 
 > ✅ **Tested:** Successfully detected ARP spoofing attacks performed with `bettercap` in a live lab environment.
 ### 🔧 Custom Filter DSL
@@ -167,7 +181,8 @@ contains "google"                        # Text search in packet summary
 - **PCAP** — Industry-standard format, compatible with Wireshark (`p` key)
 
 ### 🎨 Terminal UI (TUI)
-- **6 interactive tabs**: Dashboard, Inspection, Stats, Filters, Threats, Help
+- **7 interactive tabs**: Dashboard, Inspection, Stats, Filters, Threats, Firewall, Help
+- **5 color themes** — cycle with `t`
 - **Vim-style navigation** — `j/k` scroll, `g/G` jump, `/` search
 - **Packet detail pane** with hex dump view
 - **Protocol-colored packet list** — each protocol has a distinct color
@@ -176,59 +191,71 @@ contains "google"                        # Text search in packet summary
 
 ---
 
-## 📋 Prerequisites
+## 💻 Platform Support
 
-| Requirement | Details |
-|-------------|---------|
-| **Operating System** | Linux (tested on Kali Linux 2024.x) |
-| **Rust** | 1.75 or newer [install via rustup](https://rustup.rs/) |
-| **System Libraries** | `build-essential`, `pkg-config` |
-| **Privileges** | Root (`sudo`) or `CAP_NET_RAW` + `CAP_NET_ADMIN` capabilities |
-| **Terminal** | Any modern terminal emulator with Unicode support |
+| | Linux | Windows 10/11 | macOS |
+|---|---|---|---|
+| Capture & all detections | ✅ | ✅ (needs [Npcap](https://npcap.com/#download)) | ✅ |
+| Danger banner + bell | ✅ | ✅ | ✅ |
+| Desktop notification + sound | ✅ `notify-send` | ✅ PowerShell balloon | ✅ Notification Center |
+| Block attacker IP | ✅ iptables | ✅ Windows Firewall | ✅ pf |
+| Pin router MAC (anti ARP-poisoning) | ✅ `ip neigh` | ✅ `netsh` | ✅ `arp -S` |
+| Block attacker MAC | ✅ iptables | ❌ not supported by the OS firewall | ❌ not supported by pf |
+| Run as | `sudo` | Administrator | `sudo` |
+
+> Linux is the most tested platform. Windows and macOS support is new; please open an issue if something doesn't work.
 
 ---
 
 ## 🚀 Installation
 
-### Install Dependencies (Debian/Ubuntu/Kali)
+### Option 1: Download a ready-made build
+
+Grab the archive for your OS from the [Releases page](https://github.com/Soulcynics404/packetviper/releases), extract it, and run `packetviper` (or `packetviper.exe`) as shown below.
+
+- **Windows:** first install [Npcap](https://npcap.com/#download) and tick **"Install Npcap in WinPcap API-compatible Mode"**.
+
+### Option 2: Build from source
+
+Install Rust 1.75 or newer from [rustup.rs](https://rustup.rs/), then:
+
 ```bash
-sudo apt update
-sudo apt install -y build-essential pkg-config
-
-## Install Rust (if not already installed)
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source ~/.cargo/env
-```
-
-## Build from Source
-```
 git clone https://github.com/Soulcynics404/packetviper.git
 cd packetviper
 cargo build --release
 ```
 
+- **Linux (Debian/Ubuntu/Kali):** `sudo apt install -y build-essential pkg-config` first.
+- **macOS:** `xcode-select --install` first.
+- **Windows:** install [Npcap](https://npcap.com/#download) (WinPcap API-compatible mode), download the **Npcap SDK** from the same page, and point the linker at it before building:
+  ```powershell
+  $env:LIB = "C:\path\to\npcap-sdk\Lib\x64"
+  cargo build --release
+  ```
+
 ## Run
 
-### List available network interfaces
+List interfaces, then capture on one:
 
-```
+```bash
+# Linux
 sudo ./target/release/packetviper
-```
-### Capture on a specific interface
+sudo ./target/release/packetviper wlan0
 
-```
-sudo ./target/release/packetviper wlan0    # WiFi
-```
-```
-sudo ./target/release/packetviper eth0     # Ethernet
+# macOS
+sudo ./target/release/packetviper
+sudo ./target/release/packetviper en0
 ```
 
-### Alternative: set capabilities to avoid sudo
+```powershell
+# Windows: open PowerShell as Administrator
+.\target\release\packetviper.exe
+.\target\release\packetviper.exe "\Device\NPF_{YOUR-ADAPTER-GUID}"
 ```
-sudo setcap cap_net_raw,cap_net_admin=eip ./target/release/packetviper
 
-./target/release/packetviper wlan0
-```
+Each run writes a log to `logs/packetviper_<date>_<time>.log` with every alert and firewall action.
+
+> **Linux tip:** `sudo setcap cap_net_raw=eip ./target/release/packetviper` lets you capture without sudo, but auto-defence and `K` still need root.
 
 ### Data Flow
 ```bash

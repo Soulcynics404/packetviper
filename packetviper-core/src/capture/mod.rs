@@ -17,39 +17,6 @@ pub fn list_interfaces() -> Vec<NetworkInterface> {
         .collect()
 }
 
-/// Default gateway (IP, MAC) for `iface`, from the kernel routing and ARP tables (Linux).
-/// Read at startup so the baseline predates any ARP poisoning that starts later.
-pub fn default_gateway(iface: &str) -> Option<(String, String)> {
-    let routes = std::fs::read_to_string("/proc/net/route").ok()?;
-    let arp = std::fs::read_to_string("/proc/net/arp").ok()?;
-    parse_default_gateway(iface, &routes, &arp)
-}
-
-fn parse_default_gateway(iface: &str, routes: &str, arp: &str) -> Option<(String, String)> {
-    // Destination 00000000 = default route; Gateway is a little-endian hex IPv4.
-    let gw_hex = routes.lines().skip(1).find_map(|l| {
-        let f: Vec<&str> = l.split_whitespace().collect();
-        (f.len() > 2 && f[0] == iface && f[1] == "00000000").then(|| f[2].to_string())
-    })?;
-    let ip = std::net::Ipv4Addr::from(u32::from_str_radix(&gw_hex, 16).ok()?.swap_bytes()).to_string();
-    let mac = arp.lines().skip(1).find_map(|l| {
-        let f: Vec<&str> = l.split_whitespace().collect();
-        (f.len() > 5 && f[0] == ip && f[5] == iface && f[3] != "00:00:00:00:00:00").then(|| f[3].to_lowercase())
-    })?;
-    Some((ip, mac))
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn parses_default_gateway() {
-        let routes = "Iface\tDestination\tGateway\nwlan0\t00000000\t0101A8C0\t0003\ndocker0\t000011AC\t00000000\t0001\n";
-        let arp = "IP address HW type Flags HW address Mask Device\n192.168.1.1 0x1 0x2 B4:86:18:BA:6A:1E * wlan0\n";
-        assert_eq!(super::parse_default_gateway("wlan0", routes, arp), Some(("192.168.1.1".into(), "b4:86:18:ba:6a:1e".into())));
-        assert_eq!(super::parse_default_gateway("eth0", routes, arp), None);
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct NetworkInterface {
     pub name: String,

@@ -30,8 +30,18 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
     let blocks = td.blocks_sorted();
     let white = Style::default().fg(app.theme.text);
 
-    let (fw_text, fw_color) = if td.firewall_available { ("iptables reachable", app.theme.border) } else { ("unavailable (run as root or allow passwordless sudo iptables)", Color::Red) };
-    let (ab_text, ab_color) = if td.auto_block { ("ON — LAN attackers: gateway pinned + MAC blocked; internet floods/scans/brute force: IP blocked", Color::Red) } else { ("OFF — alerts only", app.theme.border) };
+    use packetviper_core::platform;
+    let (fw_text, fw_color) = if td.firewall_available {
+        (format!("{} reachable", platform::firewall_name()), app.theme.border)
+    } else {
+        (format!("{} unavailable — {}", platform::firewall_name(), platform::privilege_hint()), Color::Red)
+    };
+    let ab_on = if platform::mac_blocking_supported() {
+        "ON — LAN attackers: gateway pinned + MAC blocked; internet floods/scans/brute force: IP blocked"
+    } else {
+        "ON — LAN attackers: gateway pinned (MAC blocking not supported on this OS); internet attackers: IP blocked"
+    };
+    let (ab_text, ab_color) = if td.auto_block { (ab_on, Color::Red) } else { ("OFF — alerts only", app.theme.border) };
     let gw_text = match &td.gateway {
         Some((iface, ip, mac)) => format!("{} at {} on {} (baseline for spoofing/MITM checks)", ip, mac, iface),
         None => "not found — gateway spoofing / MITM relay checks are off".to_string(),

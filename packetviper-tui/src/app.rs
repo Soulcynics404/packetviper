@@ -351,7 +351,7 @@ impl App {
     pub fn toggle_auto_block(&mut self) {
         let td = &mut self.threat_detector;
         if !td.auto_block && !td.firewall_available {
-            self.status_message = "Auto-defence unavailable: needs root or passwordless sudo for iptables".to_string();
+            self.status_message = format!("Auto-defence unavailable: {}", packetviper_core::platform::privilege_hint());
             return;
         }
         td.auto_block = !td.auto_block;
@@ -379,7 +379,7 @@ impl App {
 
     pub fn kill_interface(&mut self) {
         self.status_message = match self.threat_detector.emergency_kill_interface(&self.interface) {
-            Ok(()) => format!("Interface {} is DOWN. Bring it back: sudo ip link set dev {} up", self.interface, self.interface),
+            Ok(()) => format!("Interface {} is DOWN. Bring it back: {}", self.interface, packetviper_core::platform::interface_up_hint(&self.interface)),
             Err(e) => e,
         };
     }
@@ -397,30 +397,74 @@ impl App {
 
 }
 
-/// Desktop notification plus alarm sound, delivered to the logged-in user even when we run under sudo.
-/// Runs on a background thread so a slow notification daemon never stalls the UI.
+/// Desktop notification plus alarm sound for the logged-in user (even when we run under sudo).
+/// Runs on a background thread so a slow notification service never stalls the UI.
 fn desktop_alarm(title: &str, body: &str, critical: bool) {
-    use std::process::{Command, Stdio};
     let (title, body) = (title.to_string(), body.to_string());
-    let sound = if critical { "/usr/share/sounds/freedesktop/stereo/alarm-clock-elapsed.oga" } else { "/usr/share/sounds/freedesktop/stereo/dialog-warning.oga" };
-    std::thread::spawn(move || {
-        // Under sudo, run as the real user with their session bus / audio server; otherwise run directly.
-        let as_user = |program: &str, args: &[&str]| -> Command {
-            match (std::env::var("SUDO_USER"), std::env::var("SUDO_UID")) {
-                (Ok(user), Ok(uid)) => {
-                    let mut c = Command::new("sudo");
-                    c.args(["-n", "-u", &user, "env",
-                        &format!("DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{}/bus", uid),
-                        &format!("XDG_RUNTIME_DIR=/run/user/{}", uid), program]).args(args);
-                    c
-                }
-                _ => { let mut c = Command::new(program); c.args(args); c }
-            }
-        };
-        let quiet = |mut c: Command| { let _ = c.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status(); };
-        quiet(as_user("notify-send", &["-u", "critical", "-a", "PacketViper", "-i", "dialog-warning", &title, &body]));
-        if std::path::Path::new(sound).exists() {
-            quiet(as_user("paplay", &[sound]));
-        }
-    });
+    std::thread::spawn(move || notify(&title, &body, critical));
 }
+
+fn quiet(mut c: std::process::Command) {
+    use std::process::Stdio;
+    let _ = c.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status();
+}
+
+#[cfg(target_os = "linux")]
+fn notify(title: &str, body: &str, critical: bool) {
+    use std::process::Command;
+    // Under sudo, run as the real user with their session bus / audio server; otherwise run directly.
+    let as_user = |program: &str, args: &[&str]| -> Command {
+        match (std::env::var("SUDO_USER"), std::env::var("SUDO_UID")) {
+            (Ok(user), Ok(uid)) => {
+                let mut c = Command::new("sudo");
+                c.args(["-n", "-u", &user, "env",
+                    &format!("DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{}/bus", uid),
+                    &format!("XDG_RUNTIME_DIR=/run/user/{}", uid), program]).args(args);
+                c
+            }
+            _ => { let mut c = Command::new(program); c.args(args); c }
+        }
+    };
+    quiet(as_user("notify-send", &["-u", "critical", "-a", "PacketViper", "-i", "dialog-warning", title, body]));
+    let sound = if critical { "/usr/share/sounds/freedesktop/stereo/alarm-clock-elapsed.oga" } else { "/usr/share/sounds/freedesktop/stereo/dialog-warning.oga" };
+    if std::path::Path::new(sound).exists() {
+        quiet(as_user("paplay", &[sound]));
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn notify(title: &str, body: &str, critical: bool) {
+    use std::process::Command;
+    let sound = if critical { "Sosumi" } else { "Funk" };
+    // Text goes in as argv, never spliced into the script, so packet-derived text can't inject AppleScript.
+    let script = ["-e", "on run argv", "-e", &format!("display notification (item 2 of argv) with title (item 1 of argv) sound name \"{}\"", sound), "-e", "end run"];
+    let mut c = match (std::env::var("SUDO_USER"), std::env::var("SUDO_UID")) {
+        // Notifications must come from the user's GUI session, not root's.
+        (Ok(user), Ok(uid)) => { let mut c = Command::new("launchctl"); c.args(["asuser", &uid, "sudo", "-n", "-u", &user, "osascript"]); c }
+        _ => Command::new("osascript"),
+    };
+    c.args(script).arg(title).arg(body);
+    quiet(c);
+}
+
+#[cfg(windows)]
+fn notify(title: &str, body: &str, critical: bool) {
+    use std::os::windows::process::CommandExt;
+    use std::process::Command;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    // Balloon notification + system sound via built-in PowerShell. Text is passed in environment
+    // variables, never spliced into the script, so packet-derived text can't inject commands.
+    let script = "Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; \
+        $n = New-Object System.Windows.Forms.NotifyIcon; $n.Icon = [System.Drawing.SystemIcons]::Warning; $n.Visible = $true; \
+        $n.ShowBalloonTip(10000, $env:PV_TITLE, $env:PV_BODY, 'Warning'); \
+        if ($env:PV_CRITICAL -eq '1') { [System.Media.SystemSounds]::Hand.Play() } else { [System.Media.SystemSounds]::Exclamation.Play() }; \
+        Start-Sleep -Seconds 10; $n.Dispose()";
+    let mut c = Command::new("powershell");
+    c.args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .env("PV_TITLE", title).env("PV_BODY", body).env("PV_CRITICAL", if critical { "1" } else { "0" })
+        .creation_flags(CREATE_NO_WINDOW);
+    quiet(c);
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+fn notify(_title: &str, _body: &str, _critical: bool) {}

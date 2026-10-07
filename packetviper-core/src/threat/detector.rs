@@ -15,11 +15,11 @@
 
 use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
-use std::process::{Command, Stdio};
 use chrono::{DateTime, Local, Duration};
 use serde::{Deserialize, Serialize};
 
 use crate::packets::{sanitize, CapturedPacket, PacketDirection};
+use crate::platform;
 use crate::packets::transport::TransportLayerInfo;
 use crate::packets::link::LinkLayerInfo;
 use crate::packets::network::NetworkLayerInfo;
@@ -42,9 +42,9 @@ pub struct ThreatAlert { pub id: u64, pub timestamp: DateTime<Local>, pub level:
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum BlockKind {
-    /// iptables DROP for a source IP.
+    /// Firewall rule dropping a source IP.
     Ip,
-    /// iptables/ip6tables DROP for a source MAC (ARP spoofer / MITM box on the LAN).
+    /// Firewall rule dropping a source MAC (ARP spoofer / MITM box on the LAN). Linux only.
     Mac,
     /// Permanent neighbour entry pinning the gateway IP to its real MAC, so ARP poisoning can't redirect us.
     PinnedGateway,
@@ -112,7 +112,7 @@ pub struct ThreatDetector {
     pub gateway: Option<(String, String, String)>,
     /// Off by default: detections only alert. When on, attackers get blocked and the gateway gets pinned.
     pub auto_block: bool,
-    /// Whether `sudo -n iptables` works (probed once by `probe_firewall`).
+    /// Whether firewall rules can be added (probed once by `probe_firewall`).
     pub firewall_available: bool,
 }
 
@@ -152,10 +152,14 @@ impl ThreatDetector {
         self.gateway = Some((interface.to_string(), ip.to_string(), mac));
     }
 
-    /// Checks once whether iptables can be run without a password prompt.
+    /// Checks once whether firewall rules can be added (privileges + backend).
     pub fn probe_firewall(&mut self) {
-        self.firewall_available = run_quiet("iptables", &["-S", "INPUT"]);
-        log::info!("Firewall: iptables {}", if self.firewall_available { "available" } else { "unavailable (needs root or passwordless sudo)" });
+        self.firewall_available = platform::firewall_available();
+        if self.firewall_available {
+            log::info!("Firewall: {} available", platform::firewall_name());
+        } else {
+            log::info!("Firewall: {} unavailable ({})", platform::firewall_name(), platform::privilege_hint());
+        }
     }
 
     /// Addresses that must never get an IP DROP rule: our own and any non-public address.
@@ -167,16 +171,16 @@ impl ThreatDetector {
     fn gateway_mac(&self) -> Option<&str> { self.gateway.as_ref().map(|(_, _, m)| m.as_str()) }
     fn gateway_ip(&self) -> Option<&str> { self.gateway.as_ref().map(|(_, i, _)| i.as_str()) }
 
-    /// Inserts an iptables DROP rule for `ip`. Returns true if the IP is blocked afterwards.
+    /// Adds a firewall rule dropping `ip`. Returns true if the IP is blocked afterwards.
     pub fn block_ip(&mut self, ip: &str, reason: &str) -> bool {
         if self.active_blocks.contains_key(ip) { return true; }
         if self.is_protected(ip) || self.failed_blocks.contains(ip) { return false; }
-        if run_quiet(iptables_for(ip), &["-I", "INPUT", "-s", ip, "-j", "DROP"]) {
+        if platform::block_ip(ip) {
             log::warn!("FIREWALL BLOCK IP {} — {}", ip, reason);
             self.record_block(ip, BlockKind::Ip, reason);
             true
         } else {
-            log::error!("FIREWALL BLOCK FAILED {} — {} (iptables returned an error)", ip, reason);
+            log::error!("FIREWALL BLOCK FAILED {} — {} ({} returned an error)", ip, reason, platform::firewall_name());
             // Don't spawn sudo again for every later packet from this source.
             self.failed_blocks.insert(ip.to_string());
             false
@@ -187,10 +191,9 @@ impl ThreatDetector {
     pub fn block_mac(&mut self, mac: &str, reason: &str) -> bool {
         let mac = mac.to_lowercase();
         if self.active_blocks.contains_key(&mac) { return true; }
+        if !platform::mac_blocking_supported() { return false; }
         if self.local_macs.contains(&mac) || self.gateway_mac() == Some(mac.as_str()) || !is_mac(&mac) || self.failed_blocks.contains(&mac) { return false; }
-        let args = ["-I", "INPUT", "-m", "mac", "--mac-source", mac.as_str(), "-j", "DROP"];
-        if run_quiet("iptables", &args) {
-            run_quiet("ip6tables", &args);
+        if platform::block_mac(&mac) {
             log::warn!("FIREWALL BLOCK MAC {} — {}", mac, reason);
             self.record_block(&mac, BlockKind::Mac, reason);
             true
@@ -206,7 +209,7 @@ impl ThreatDetector {
         let Some((iface, ip, mac)) = self.gateway.clone() else { return false };
         let key = format!("gateway {}", ip);
         if self.active_blocks.contains_key(&key) { return true; }
-        if run_quiet("ip", &["neigh", "replace", &ip, "lladdr", &mac, "nud", "permanent", "dev", &iface]) {
+        if platform::pin_neighbor(&iface, &ip, &mac) {
             log::warn!("ARP PIN gateway {} -> {} on {}", ip, mac, iface);
             self.record_block(&key, BlockKind::PinnedGateway, &format!("{} pinned to real MAC {}", ip, mac));
             true
@@ -233,15 +236,11 @@ impl ThreatDetector {
     pub fn unblock_ip(&mut self, key: &str) -> bool {
         let Some(entry) = self.active_blocks.remove(key) else { return false };
         let ok = match entry.kind {
-            BlockKind::Ip => run_quiet(iptables_for(key), &["-D", "INPUT", "-s", key, "-j", "DROP"]),
-            BlockKind::Mac => {
-                let args = ["-D", "INPUT", "-m", "mac", "--mac-source", key, "-j", "DROP"];
-                run_quiet("ip6tables", &args);
-                run_quiet("iptables", &args)
-            }
+            BlockKind::Ip => platform::unblock_ip(key),
+            BlockKind::Mac => platform::unblock_mac(key),
             BlockKind::PinnedGateway => match &self.gateway {
-                // Deleting the entry lets the kernel resolve the gateway normally again.
-                Some((iface, ip, _)) => run_quiet("ip", &["neigh", "del", ip, "dev", iface]),
+                // Deleting the entry lets the OS resolve the gateway normally again.
+                Some((iface, ip, _)) => platform::unpin_neighbor(iface, ip),
                 None => false,
             },
         };
@@ -263,7 +262,7 @@ impl ThreatDetector {
     }
 
     pub fn emergency_kill_interface(&self, interface_name: &str) -> Result<(), String> {
-        if run_quiet("ip", &["link", "set", "dev", interface_name, "down"]) {
+        if platform::interface_down(interface_name) {
             log::warn!("INTERFACE KILL {} taken down by user", interface_name);
             Ok(())
         } else {
@@ -513,9 +512,9 @@ impl ThreatDetector {
         let blocked = self.block_mac(mac, reason);
         match (pinned, blocked) {
             (true, true) => " (DEFENDED: gateway pinned, attacker MAC blocked)",
-            (true, false) => " (gateway pinned; MAC block failed)",
+            (true, false) => " (gateway pinned; MAC block unavailable or failed)",
             (false, true) => " (attacker MAC blocked; no gateway to pin)",
-            (false, false) => " (defence failed — check iptables/root)",
+            (false, false) => " (defence failed — check firewall access/privileges)",
         }
     }
 
@@ -571,19 +570,6 @@ fn is_public(ip: &str) -> bool {
 
 fn is_mac(s: &str) -> bool {
     s.len() == 17 && s.split(':').all(|p| p.len() == 2 && p.chars().all(|c| c.is_ascii_hexdigit()))
-}
-
-fn iptables_for(ip: &str) -> &'static str {
-    if ip.contains(':') { "ip6tables" } else { "iptables" }
-}
-
-/// Runs a privileged command via `sudo -n` with all stdio detached, so nothing is written over the TUI
-/// and it never waits on a password prompt. Returns true on success.
-// ponytail: runs on the UI thread; iptables returns in milliseconds. Move to a worker thread if it ever stalls.
-fn run_quiet(cmd: &str, args: &[&str]) -> bool {
-    Command::new("sudo").arg("-n").arg(cmd).args(args)
-        .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
-        .status().map(|s| s.success()).unwrap_or(false)
 }
 
 #[cfg(test)]
