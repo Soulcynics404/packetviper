@@ -6,11 +6,11 @@
 
 [![Rust](https://img.shields.io/badge/Built%20With-Rust-orange?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-Linux-blue?style=for-the-badge&logo=linux&logoColor=white)](https://www.linux.org/)
+[![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows%20%7C%20macOS-blue?style=for-the-badge)](#-platform-support)
 [![GitHub](https://img.shields.io/badge/Author-Soulcynics404-purple?style=for-the-badge&logo=github)](https://github.com/Soulcynics404)
 
 <img src="https://img.shields.io/badge/status-active_development-brightgreen" />
-<img src="https://img.shields.io/badge/version-0.1.0-blue" />
+<a href="https://github.com/Soulcynics404/packetviper/releases/latest"><img src="https://img.shields.io/github/v/release/Soulcynics404/packetviper" /></a>
 <img src="https://img.shields.io/github/languages/code-size/Soulcynics404/packetviper" />
 <img src="https://img.shields.io/github/last-commit/Soulcynics404/packetviper" />
 
