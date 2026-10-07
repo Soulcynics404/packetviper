@@ -83,11 +83,16 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             )),
             Line::from(""),
             Line::from("  The threat detector monitors for:"),
-            Line::from("    • Port scanning (>15 unique ports from same source)"),
-            Line::from("    • ARP spoofing (multiple MACs for same IP)"),
-            Line::from("    • DNS tunneling (unusually long domain queries)"),
-            Line::from("    • Suspicious port usage (known malware ports)"),
-            Line::from("    • High traffic rate (>500 pkt/10s from one source)"),
+            Line::from("    • Gateway spoofing / MITM relay (someone intercepting your traffic)"),
+            Line::from("    • ARP spoofing (an IP claimed by a new MAC)"),
+            Line::from("    • ICMP redirects, rogue DHCP servers, rogue IPv6 routers (mitm6)"),
+            Line::from("    • Access attempts and brute force on file sharing / remote access (SMB, SSH, RDP, VNC...)"),
+            Line::from("    • Port scanning (>15 unique ports from one source in 60s)"),
+            Line::from("    • SYN/ICMP floods (>200 new connection attempts in 10s)"),
+            Line::from("    • LLMNR/NetBIOS poisoning (Responder), MAC flooding"),
+            Line::from("    • DNS tunneling and traffic to known backdoor ports"),
+            Line::from(""),
+            Line::from("  High/Critical alerts show a danger banner, beep and send a desktop notification."),
         ])
         .block(
             Block::default()

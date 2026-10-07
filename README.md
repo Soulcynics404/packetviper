@@ -53,10 +53,18 @@
 </details>
 
 <details>
-<summary>🛡️ <b>Threat Detection</b> — ARP spoofing, port scanning, DNS tunneling detection (click to expand)</summary>
+<summary>🛡️ <b>Threat Detection</b> — MITM, ARP spoofing, rogue DHCP/IPv6, remote-access attempts, scans and floods (click to expand)</summary>
 <br>
 
 ![Threats](assets/threats.png)
+
+</details>
+
+<details>
+<summary>🔥 <b>Firewall View</b> — Auto-defence status, gateway baseline, active protections (click to expand)</summary>
+<br>
+
+![Firewall](assets/firewall.png)
 
 </details>
 
@@ -146,7 +154,7 @@ A powerful domain-specific language for filtering traffic:
 
 | Filter | Description |
 |--------|-------------|
-| `ip == 192.168.1.1` | Source IP match |
+| `ip == 192.168.1.1` | Source or destination IP |
 | `dst == 8.8.8.8` | Destination IP |
 | `port == 443` | Source or destination port |
 | `sport == 80` | Source port only |

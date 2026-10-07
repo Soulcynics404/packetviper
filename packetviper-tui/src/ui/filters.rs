@@ -110,7 +110,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             " ── Field Filters ──",
             Style::default().fg(app.theme.accent1).add_modifier(Modifier::BOLD),
         )),
-        Line::from("   ip == 192.168.1.1         Source IP matches"),
+        Line::from("   ip == 192.168.1.1         Source or destination IP"),
         Line::from("   dst == 8.8.8.8            Destination IP"),
         Line::from("   port == 443               Source or destination port"),
         Line::from("   sport == 80               Source port only"),
