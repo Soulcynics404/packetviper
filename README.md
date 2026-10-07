@@ -284,6 +284,41 @@ Each run writes a log to `logs/packetviper_<date>_<time>.log` with every alert a
 
 > **Linux tip:** `sudo setcap cap_net_raw=eip ./target/release/packetviper` lets you capture without sudo, but auto-defence and `K` still need root.
 
+## 📱 Phone dashboard & remote alerts
+
+PacketViper serves a mobile dashboard so your phone sees live status and gets danger alerts.
+
+- **Same Wi-Fi (built in):** press `o` in the TUI (or read the `serve` output) for a QR + link. Open it on your phone — big SAFE/DANGER banner that flashes, beeps and vibrates, live speed, top uploading apps, alerts, and (optionally) controls to toggle autosave/auto-defence and the ring size. Access is gated by a per-run token in the link.
+- **Anywhere (optional relay):** run the tiny `packetviper-relay` on a server (an **AWS free-tier `t2.micro`/`t3.micro` is plenty**) so alerts reach your phone on mobile data too.
+
+### Deploy the relay (AWS free tier)
+
+```bash
+# On the EC2 instance (Amazon Linux/Ubuntu), with Rust installed:
+git clone https://github.com/Soulcynics404/packetviper.git && cd packetviper
+cargo build --release -p packetviper-relay
+./target/release/packetviper-relay 9000        # or: PORT=9000 ./packetviper-relay
+```
+
+- Open port **9000** in the instance's **Security Group** (inbound).
+- Keep it running with systemd, e.g. `ExecStart=/path/packetviper-relay 9000`, `Restart=always`.
+
+On the **laptop**, set in `packetviper-config.json` (created on first run):
+
+```json
+{ "relay_enabled": true, "relay_url": "http://<EC2-PUBLIC-IP>:9000" }
+```
+
+Restart PacketViper. A pair code is generated and saved automatically; press `o` to get the "open from anywhere" QR/link for your phone.
+
+> **Security:** the relay uses plain HTTP, so the pair code and the summary data (no packet contents — just counts, rates, alert text, app names, IPs) travel unencrypted. For real use, front the relay with HTTPS (e.g. **Caddy**, which gets a free certificate automatically) or, simplest and fully encrypted with **no relay code at all**, use a reverse SSH tunnel:
+> ```bash
+> # exposes your laptop's LAN dashboard via the EC2 box, encrypted over SSH:
+> ssh -R 0.0.0.0:8080:localhost:7373 user@<EC2-PUBLIC-IP>
+> # then open  http://<EC2-PUBLIC-IP>:8080/?t=<token from the o screen>
+> ```
+> Treat the pair code / token like a password.
+
 ### Data Flow
 ```bash
 ┌──────────────────────────────────────────────────┐

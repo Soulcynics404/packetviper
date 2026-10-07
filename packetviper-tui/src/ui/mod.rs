@@ -99,15 +99,24 @@ pub fn render(f: &mut Frame, app: &App) {
 
 /// "See on another device" popup: a scannable QR plus the LAN URL (with token) to open on a phone.
 fn render_connect(f: &mut Frame, area: Rect, app: &App) {
-    let body = match &app.server {
-        Some(s) => {
+    let body = match (&app.server, &app.relay_url) {
+        // Relay configured: show the "anywhere" link (works off the LAN) as the primary QR.
+        (_, Some(relay)) => {
+            let qr = crate::server::qr_text(relay).unwrap_or_default();
+            let lan = app.server.as_ref().map(|s| s.url.as_str()).unwrap_or("(LAN dashboard off)");
+            format!(
+                "Scan to open from ANYWHERE (via your relay):\n\n{}\n{}\n\nSame Wi-Fi only:  {}\n\nTreat these links as passwords — share only via this QR.   [o] close",
+                qr, relay, lan
+            )
+        }
+        (Some(s), None) => {
             let qr = crate::server::qr_text(&s.url).unwrap_or_default();
             format!(
                 "Scan with your phone camera (same Wi-Fi):\n\n{}\nOr open:  {}\n\nAnyone with this link can view your monitor — share only via this\nQR/link. The access token changes every run.   [o] close",
                 qr, s.url
             )
         }
-        None => "Dashboard server is not running.\nEnable it in packetviper-config.json (\"http_enabled\": true) and restart.\n\n[o] close".to_string(),
+        (None, None) => "Dashboard server is not running.\nEnable it in packetviper-config.json (\"http_enabled\": true) and restart.\n\n[o] close".to_string(),
     };
     // Size the popup to the QR so it isn't clipped (QR is ~33 half-block rows wide/tall for this URL).
     let content_w = body.lines().map(|l| l.chars().count()).max().unwrap_or(40) as u16 + 4;

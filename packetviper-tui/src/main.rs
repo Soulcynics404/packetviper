@@ -77,7 +77,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     log::info!("PacketViper started on interface {} (log: {})", interface_name, log_path.as_deref().unwrap_or("unavailable"));
     let started = std::time::Instant::now();
 
-    let config = packetviper_core::config::Config::load();
+    let mut config = packetviper_core::config::Config::load();
     let autosave_flag = Arc::new(AtomicBool::new(config.autosave));
 
     let mut app = App::new(&interface_name);
@@ -96,6 +96,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         app.cmd_rx = Some(cmd_rx);
         app.server = server::start(config.http_port, app.server_json.clone(), cmd_tx, config.http_allow_control);
     }
+    maybe_start_relay(&mut config, &mut app);
     if let Some(session_path) = args.get(2) {
         app.load_session(session_path);
     }
@@ -259,6 +260,22 @@ fn sudo_user() -> Option<(u32, u32)> {
     Some((id("SUDO_UID")?, id("SUDO_GID")?))
 }
 
+/// Starts relay push if configured, generating and saving a pair code on first use, and records the
+/// phone URL for the Connect screen. No-op when the relay is disabled or has no URL.
+fn maybe_start_relay(config: &mut packetviper_core::config::Config, app: &mut App) {
+    if !config.relay_enabled || config.relay_url.trim().is_empty() { return; }
+    if config.relay_code.is_empty() {
+        match server::gen_pair_code() {
+            Some(c) => { config.relay_code = c; let _ = config.save(); }
+            None => { log::warn!("Relay disabled: could not generate a pair code"); return; }
+        }
+    }
+    let base = config.relay_url.trim_end_matches('/').to_string();
+    if server::start_relay_push(&base, &config.relay_code, app.server_json.clone()) {
+        app.relay_url = Some(format!("{}/r/{}", base, config.relay_code));
+    }
+}
+
 /// Writes `data` to `path` owner-readable only. Created atomically at mode 0600 with O_EXCL, so there
 /// is no world-readable window and a pre-planted file/symlink is never followed (the open fails instead).
 fn write_private(path: &str, data: &[u8]) -> std::io::Result<()> {
@@ -291,7 +308,7 @@ fn run_serve(iface: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let config = packetviper_core::config::Config::load();
+    let mut config = packetviper_core::config::Config::load();
     let autosave_flag = Arc::new(AtomicBool::new(config.autosave));
     let mut app = App::new(iface);
     app.threat_detector.auto_block = config.auto_block;
@@ -334,6 +351,8 @@ fn run_serve(iface: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
             app.server = Some(h);
         }
     }
+    maybe_start_relay(&mut config, &mut app);
+    if let Some(u) = &app.relay_url { println!("Relay: open from anywhere:\n   {}", u); }
     log::info!("serve: monitoring {} in the background (auto-defence={}, autosave={})", iface, config.auto_block, config.autosave);
 
     // Stop cleanly on Ctrl-C / SIGTERM so firewall rules are removed and the capture file is flushed.

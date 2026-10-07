@@ -141,6 +141,8 @@ pub struct App {
     pub server_json: crate::server::SharedJson,
     /// Running dashboard server (URL + token), shown on the Connect screen.
     pub server: Option<crate::server::ServerHandle>,
+    /// Relay dashboard URL (/r/<code>) shown on the Connect screen when the relay is configured.
+    pub relay_url: Option<String>,
     pub show_connect: bool,
     /// Receives settings changes from the phone dashboard (applied each loop by `drain_commands`).
     pub cmd_rx: Option<crossbeam_channel::Receiver<crate::server::Command>>,
@@ -192,6 +194,7 @@ impl App {
             autosave_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             server_json: std::sync::Arc::new(std::sync::Mutex::new("{}".to_string())),
             server: None,
+            relay_url: None,
             show_connect: false,
             cmd_rx: None,
             seen_alert_id: 0,

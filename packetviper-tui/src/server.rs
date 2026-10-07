@@ -236,6 +236,9 @@ fn query_token(query: &str) -> String {
     query.split('&').find_map(|kv| kv.strip_prefix("t=")).unwrap_or("").to_string()
 }
 
+/// A random pair code (room + secret) for the relay, from the OS CSPRNG. None if unavailable.
+pub fn gen_pair_code() -> Option<String> { random_token() }
+
 /// A 128-bit URL-safe token from the OS cryptographic RNG. Returns None if secure randomness is
 /// unavailable — we refuse to serve with a guessable token rather than fall back to a weak one.
 fn random_token() -> Option<String> {
@@ -253,6 +256,52 @@ fn lan_ip() -> Option<String> {
 }
 
 const DASHBOARD_HTML: &str = include_str!("dashboard.html");
+
+/// Pushes the live snapshot to a relay server (`relay_url/push/<code>`) every ~2s, so the phone can
+/// see alerts off the LAN by opening `relay_url/r/<code>`. http:// only; one connection per push.
+/// Returns false if the relay URL is unusable.
+pub fn start_relay_push(relay_url: &str, code: &str, shared: SharedJson) -> bool {
+    let Some((host, port)) = parse_http_host(relay_url) else {
+        log::warn!("Relay disabled: relay_url must look like http://host:port (got '{}')", relay_url);
+        return false;
+    };
+    let code = code.to_string();
+    log::info!("Relay push enabled to {}:{} (room {}...)", host, port, &code[..code.len().min(4)]);
+    std::thread::spawn(move || loop {
+        let body = shared.lock().map(|s| s.clone()).unwrap_or_default();
+        if let Err(e) = push_once(&host, port, &code, &body) {
+            log::debug!("Relay push failed: {}", e);
+        }
+        std::thread::sleep(std::time::Duration::from_secs(2));
+    });
+    true
+}
+
+/// One HTTP POST to the relay (std only; no TLS — http:// relays only).
+fn push_once(host: &str, port: u16, code: &str, body: &str) -> std::io::Result<()> {
+    let mut stream = TcpStream::connect((host, port))?;
+    stream.set_write_timeout(Some(std::time::Duration::from_secs(5)))?;
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(5)))?;
+    let req = format!(
+        "POST /push/{} HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        code, host, body.len(), body
+    );
+    stream.write_all(req.as_bytes())?;
+    let _ = stream.flush();
+    let mut sink = [0u8; 256];
+    let _ = stream.read(&mut sink); // drain/ignore the response
+    Ok(())
+}
+
+/// Parses "http://host:port" (port optional, defaults 80). Returns None for https/other schemes.
+fn parse_http_host(url: &str) -> Option<(String, u16)> {
+    let rest = url.strip_prefix("http://")?;
+    let authority = rest.split('/').next().unwrap_or(rest);
+    match authority.rsplit_once(':') {
+        Some((h, p)) => Some((h.to_string(), p.parse().ok()?)),
+        None => Some((authority.to_string(), 80)),
+    }
+}
 
 /// Renders `text` (the dashboard URL) as a scannable QR using half-block characters, so it fits in the
 /// terminal Connect screen. Returns None if the text is too long to encode.

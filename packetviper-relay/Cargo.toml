@@ -1,0 +1,14 @@
+[package]
+name = "packetviper-relay"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Tiny relay server so PacketViper alerts reach your phone anywhere (not just on the LAN)"
+
+[[bin]]
+name = "packetviper-relay"
+path = "src/main.rs"
+
+# Intentionally dependency-free (std only): small, easy to audit, trivial to deploy on a free VPS.
+[dependencies]

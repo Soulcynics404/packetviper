@@ -73,6 +73,10 @@
 
 <script>
 const T = new URLSearchParams(location.search).get('t') || '';
+// Served at "/" on the LAN, or "/r/<code>" through the relay. The relay view is read-only.
+const BASE = location.pathname.replace(/\/+$/,'');
+const IS_RELAY = BASE.startsWith('/r/');
+const EVENTS_URL = IS_RELAY ? (BASE + '/events') : ('/api/events?t=' + encodeURIComponent(T));
 const $ = id => document.getElementById(id);
 const bytes = n => { n=+n||0; const u=['B','KB','MB','GB','TB']; let i=0; while(n>=1024&&i<u.length-1){n/=1024;i++;} return n.toFixed(i?1:0)+' '+u[i]; };
 let ctx, lastBeep=0, wasDanger=false;
@@ -141,8 +145,10 @@ document.querySelectorAll('.step').forEach(b => b.onclick = () => {
   post({ring_mb: Math.max(16, cur + (+b.dataset.d))});
 });
 
+if (IS_RELAY) { const c = document.getElementById('controls'); if (c) c.previousElementSibling.style.display = c.style.display = 'none'; }
+
 function connect(){
-  const es = new EventSource('/api/events?t='+encodeURIComponent(T));
+  const es = new EventSource(EVENTS_URL);
   es.onmessage = e => { try { render(JSON.parse(e.data)); } catch(err){} };
   es.onerror = () => { $('off').style.display='flex'; es.close(); setTimeout(connect, 3000); };
 }

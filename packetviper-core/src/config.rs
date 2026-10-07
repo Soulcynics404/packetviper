@@ -28,6 +28,12 @@ pub struct Config {
     /// dashboard is read-only. On by default because remote control was requested; note the dashboard
     /// is plain HTTP on the LAN, so anyone who captures the token could change settings.
     pub http_allow_control: bool,
+    /// Push status to a relay server so alerts reach your phone off the LAN (off by default).
+    pub relay_enabled: bool,
+    /// Relay base URL, e.g. "http://1.2.3.4:9000" (your AWS instance). http:// only in this version.
+    pub relay_url: String,
+    /// Shared pair code (room + secret) used with the relay; generated on first use if empty.
+    pub relay_code: String,
 }
 
 impl Default for Config {
@@ -40,6 +46,9 @@ impl Default for Config {
             http_enabled: true,
             http_port: 7373,
             http_allow_control: true,
+            relay_enabled: false,
+            relay_url: String::new(),
+            relay_code: String::new(),
         }
     }
 }

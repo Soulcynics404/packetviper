@@ -2,6 +2,7 @@
 members = [
     "packetviper-core",
     "packetviper-tui",
+    "packetviper-relay",
 ]
 resolver = "2"
 
