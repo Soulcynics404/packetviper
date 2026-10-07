@@ -256,18 +256,20 @@ fn sudo_user() -> Option<(u32, u32)> {
     Some((id("SUDO_UID")?, id("SUDO_GID")?))
 }
 
-/// Writes `data` to `path` owner-readable only (0600 on Unix), refusing a symlinked path.
+/// Writes `data` to `path` owner-readable only. Created atomically at mode 0600 with O_EXCL, so there
+/// is no world-readable window and a pre-planted file/symlink is never followed (the open fails instead).
 fn write_private(path: &str, data: &[u8]) -> std::io::Result<()> {
-    if std::fs::symlink_metadata(path).map(|m| m.file_type().is_symlink()).unwrap_or(false) {
-        return Err(std::io::Error::new(std::io::ErrorKind::Other, "refusing symlinked path"));
-    }
-    std::fs::write(path, data)?;
+    use std::io::Write;
+    let _ = std::fs::remove_file(path); // replace any stale link from a previous run
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
     }
-    Ok(())
+    let mut f = opts.open(path)?;
+    f.write_all(data)
 }
 
 /// Headless monitor: capture + detect + alert + autosave with no terminal UI. Used by the autostart
