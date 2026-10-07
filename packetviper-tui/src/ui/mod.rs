@@ -73,11 +73,13 @@ pub fn render(f: &mut Frame, app: &App) {
     }
 
     let status_style = Style::default().fg(if app.capturing { app.theme.capture_active } else { app.theme.capture_stopped });
+    let autosave_on = app.autosave_flag.load(std::sync::atomic::Ordering::Relaxed);
     let footer_text = vec![
         Span::styled(if app.capturing { " [LIVE] " } else { " [PAUSED] " }, status_style),
-        Span::styled(format!(" | {} | ", app.status_message), Style::default().fg(app.theme.accent3)),
+        Span::styled(if autosave_on { "[● REC] " } else { "" }, Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+        Span::styled(format!("| {} | ", app.status_message), Style::default().fg(app.theme.accent3)),
         Span::raw(format!("Theme: {} | ", app.theme.name.name())),
-        Span::raw(" [←/→] Tabs | [c] capture/pause | [?] Help tab | [q]uit"),
+        Span::raw(" [←/→] Tabs | [c] capture/pause | [w] autosave | [?] Help | [q]uit"),
     ];
     let footer = Paragraph::new(Line::from(footer_text)).block(Block::default().borders(Borders::TOP));
     f.render_widget(footer, chunks[2]);

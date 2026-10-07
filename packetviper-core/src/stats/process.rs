@@ -101,16 +101,18 @@ mod linux {
     }
 
     /// Reads /proc/<pid>/comm (short name), falling back to the basename of the cmdline.
+    /// A process can set its own name, so the result is sanitized (control chars stripped) before
+    /// it ever reaches the TUI, and capped in length.
     fn proc_name(pid: u32) -> String {
-        if let Ok(comm) = fs::read_to_string(format!("/proc/{}/comm", pid)) {
-            let name = comm.trim();
-            if !name.is_empty() { return name.to_string(); }
-        }
-        fs::read_to_string(format!("/proc/{}/cmdline", pid))
+        let raw = fs::read_to_string(format!("/proc/{}/comm", pid))
             .ok()
-            .and_then(|c| c.split('\0').next().map(|s| s.rsplit('/').next().unwrap_or(s).to_string()))
+            .map(|c| c.trim().to_string())
             .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| format!("pid {}", pid))
+            .or_else(|| fs::read_to_string(format!("/proc/{}/cmdline", pid)).ok()
+                .and_then(|c| c.split('\0').next().map(|s| s.rsplit('/').next().unwrap_or(s).to_string()))
+                .filter(|s| !s.is_empty()))
+            .unwrap_or_else(|| format!("pid {}", pid));
+        crate::packets::sanitize(raw.chars().take(64).collect::<String>().as_str())
     }
 
     /// Each row after the header: "sl local_addr:port rem_addr:port st ... inode" with inode at field 9.
@@ -138,6 +140,9 @@ use crate::packets::transport::TransportLayerInfo;
 
 /// Tracks how many bytes each local process has sent/received this session, so the UI can answer
 /// "which app is uploading?". Attribution is best-effort and Linux-only (see `ProcessResolver`).
+/// Upper bound on tracked processes, so PID churn or spoofing can't grow memory without limit.
+const MAX_PROCS: usize = 4096;
+
 pub struct NetMonitor {
     resolver: ProcessResolver,
     by_pid: HashMap<u32, ProcTraffic>,
@@ -180,6 +185,15 @@ impl NetMonitor {
             }
         } else {
             entry.in_bytes += packet.length as u64;
+        }
+        // Normal systems have hundreds of processes; cap in case of PID churn/spoofing so the map
+        // can't grow without bound. Drop the lowest-traffic entries when over the cap.
+        if self.by_pid.len() > MAX_PROCS {
+            let mut totals: Vec<(u32, u64)> = self.by_pid.iter().map(|(p, t)| (*p, t.out_bytes + t.in_bytes)).collect();
+            totals.sort_by_key(|(_, b)| *b);
+            for (pid, _) in totals.into_iter().take(self.by_pid.len() - MAX_PROCS) {
+                self.by_pid.remove(&pid);
+            }
         }
     }
 

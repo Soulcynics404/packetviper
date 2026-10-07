@@ -135,6 +135,8 @@ pub struct App {
     /// Set by Ctrl+L / resize: the main loop clears the terminal and repaints everything.
     pub force_redraw: bool,
     pub alarm: Option<Alarm>,
+    pub config: packetviper_core::config::Config,
+    pub autosave_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
     seen_alert_id: u64,
     last_bell: Option<std::time::Instant>,
     last_notify: Option<std::time::Instant>,
@@ -179,6 +181,8 @@ impl App {
             firewall_selected: 0,
             force_redraw: false,
             alarm: None,
+            config: packetviper_core::config::Config::default(),
+            autosave_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             seen_alert_id: 0,
             last_bell: None,
             last_notify: None,
@@ -352,6 +356,29 @@ impl App {
             Err(e) => { log::error!("Export failed: {}", e); self.status_message = format!("Export failed: {}", e) }
         }
     }
+    /// Turns capture-to-disk on/off at runtime and saves the choice to the config file.
+    pub fn toggle_autosave(&mut self) {
+        use std::sync::atomic::Ordering;
+        let on = !self.autosave_flag.load(Ordering::Relaxed);
+        self.autosave_flag.store(on, Ordering::Relaxed);
+        self.config.autosave = on;
+        let saved = self.config.save();
+        self.status_message = match saved {
+            Ok(()) => format!("Autosave: {} (ring {} MB in {}/){}", if on { "ON" } else { "OFF" }, self.config.ring_buffer_mb, self.config.capture_dir,
+                if on { "" } else { " — existing files kept" }),
+            Err(e) => format!("Autosave: {} (config save failed: {})", if on { "ON" } else { "OFF" }, e),
+        };
+        log::info!("Autosave toggled {}", if on { "ON" } else { "OFF" });
+    }
+
+    /// Sets the ring-buffer cap in MB and saves it. Takes effect for new segments immediately; the
+    /// running writer enforces the new cap as it rotates.
+    pub fn set_ring_size_mb(&mut self, mb: u64) {
+        self.config.ring_buffer_mb = mb;
+        let _ = self.config.save();
+        self.status_message = format!("Ring buffer size set to {} MB (restart to resize the open file)", mb);
+    }
+
     pub fn toggle_auto_block(&mut self) {
         let td = &mut self.threat_detector;
         if !td.auto_block && !td.firewall_available {
@@ -359,13 +386,16 @@ impl App {
             return;
         }
         td.auto_block = !td.auto_block;
-        log::warn!("Auto-defence turned {}", if td.auto_block { "ON" } else { "OFF" });
-        self.status_message = if td.auto_block {
+        let on = td.auto_block;
+        log::warn!("Auto-defence turned {}", if on { "ON" } else { "OFF" });
+        self.status_message = if on {
             let n = td.defend_known_attackers();
             format!("Auto-defence ON — {} attacker(s) already detected were blocked", n)
         } else {
             "Auto-defence OFF (alerts only; existing protections stay until removed with u/U)".to_string()
         };
+        self.config.auto_block = on;
+        let _ = self.config.save();
     }
 
     pub fn unblock_selected(&mut self) {

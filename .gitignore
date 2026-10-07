@@ -25,3 +25,7 @@ exports/
 
 # GeoIP database (large binary)
 data/*.mmdb
+# Runtime capture + config
+captures/
+packetviper-config.json
+*.pcap

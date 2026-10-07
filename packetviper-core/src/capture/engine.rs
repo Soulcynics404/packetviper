@@ -34,6 +34,10 @@ pub struct CaptureEngine {
     packet_counter: Arc<AtomicU64>,
     /// Flag to stop capture
     running: Arc<AtomicBool>,
+    /// Rolling capture-to-disk writer (present only when autosave is configured).
+    ring: Option<crate::capture::ring::RingWriter>,
+    /// Runtime on/off for autosave, shared with the UI so it can be toggled while running.
+    autosave: Arc<AtomicBool>,
 }
 
 impl CaptureEngine {
@@ -43,7 +47,16 @@ impl CaptureEngine {
             interface_name: interface_name.to_string(),
             packet_counter: Arc::new(AtomicU64::new(0)),
             running: Arc::new(AtomicBool::new(false)),
+            ring: None,
+            autosave: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Attaches a ring-buffer writer and the shared on/off flag for capture-to-disk.
+    pub fn with_autosave(mut self, ring: crate::capture::ring::RingWriter, flag: Arc<AtomicBool>) -> Self {
+        self.ring = Some(ring);
+        self.autosave = flag;
+        self
     }
 
     /// Get a handle to the running flag (to stop capture from outside)
@@ -52,7 +65,7 @@ impl CaptureEngine {
     }
 
     /// Start capturing packets and send them through the channel
-    pub fn start_capture(&self, tx: Sender<CapturedPacket>) -> Result<(), String> {
+    pub fn start_capture(&mut self, tx: Sender<CapturedPacket>) -> Result<(), String> {
         let interface = datalink::interfaces()
             .into_iter()
             .find(|iface| iface.name == self.interface_name)
@@ -84,6 +97,15 @@ impl CaptureEngine {
         while running.load(Ordering::SeqCst) {
             match rx.next() {
                 Ok(frame) => {
+                    // Full-frame capture to the ring buffer (independent of the 128-byte preview),
+                    // only while autosave is on.
+                    if self.autosave.load(Ordering::Relaxed) {
+                        if let Some(ring) = self.ring.as_mut() {
+                            if let Err(e) = ring.write_frame(frame) {
+                                log::error!("Autosave write failed: {}", e);
+                            }
+                        }
+                    }
                     let id = counter.fetch_add(1, Ordering::SeqCst);
                     if let Some(packet) = Self::parse_ethernet_frame(
                         id,

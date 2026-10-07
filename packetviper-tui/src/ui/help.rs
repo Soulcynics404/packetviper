@@ -41,6 +41,8 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             "  ── Export ──",
             Style::default().fg(app.theme.accent2).add_modifier(Modifier::BOLD),
         )),
+        Line::from("   w                  Autosave capture to disk on/off (ring buffer)"),
+        Line::from("   [ / ]              Decrease / increase ring-buffer size (256 MB steps)"),
         Line::from("   e                  Export to JSON"),
         Line::from("   E                  Export to CSV"),
         Line::from("   p                  Export to PCAP"),

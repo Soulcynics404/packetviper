@@ -5,6 +5,7 @@ pub mod stats;
 pub mod threat;
 pub mod export;
 pub mod platform;
+pub mod config;
 
 pub mod prelude {
     pub use crate::capture::engine::CaptureEngine;

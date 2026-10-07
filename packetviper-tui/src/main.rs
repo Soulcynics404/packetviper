@@ -6,6 +6,8 @@ mod ui;
 
 use std::io;
 use std::thread;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use crossbeam_channel::bounded;
 use crossterm::execute;
@@ -62,7 +64,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     log::info!("PacketViper started on interface {} (log: {})", interface_name, log_path.as_deref().unwrap_or("unavailable"));
     let started = std::time::Instant::now();
 
+    let config = packetviper_core::config::Config::load();
+    let autosave_flag = Arc::new(AtomicBool::new(config.autosave));
+
     let mut app = App::new(&interface_name);
+    app.threat_detector.auto_block = config.auto_block;
+    app.autosave_flag = autosave_flag.clone();
+    app.config = config.clone();
     app.threat_detector.set_local_ips(interfaces.iter().flat_map(|i| i.ips.clone()));
     app.threat_detector.set_local_macs(interfaces.iter().filter_map(|i| i.mac.clone()));
     match packetviper_core::platform::default_gateway(&interface_name) {
@@ -87,7 +95,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
 
     let (pkt_tx, pkt_rx) = bounded(10000);
-    let engine = CaptureEngine::new(&interface_name);
+    let mut engine = CaptureEngine::new(&interface_name);
+    // Open the rolling capture file so autosave can be toggled on/off live; writes only happen when on.
+    match packetviper_core::capture::ring::RingWriter::new(&config.capture_dir, config.ring_bytes()) {
+        Ok(ring) => {
+            engine = engine.with_autosave(ring, autosave_flag.clone());
+            log::info!("Autosave ready: dir={} cap={} MB, enabled={}", config.capture_dir, config.ring_buffer_mb, config.autosave);
+        }
+        Err(e) => log::warn!("Autosave unavailable (cannot open capture dir '{}'): {}", config.capture_dir, e),
+    }
     let running_flag = engine.get_running_flag();
     let capture_thread = thread::spawn(move || {
         if let Err(e) = engine.start_capture(pkt_tx) {

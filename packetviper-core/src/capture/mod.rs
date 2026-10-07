@@ -1,6 +1,7 @@
 pub mod engine;
 pub mod stream;
 pub mod plugins;
+pub mod ring;
 
 pub fn list_interfaces() -> Vec<NetworkInterface> {
     pnet_datalink::interfaces()

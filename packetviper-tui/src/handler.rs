@@ -51,6 +51,9 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
             app.status_message = format!("Take interface {} DOWN? This cuts your network. y = yes, any other key = cancel", app.interface);
         }
         KeyCode::Char('A') => app.toggle_auto_block(),
+        KeyCode::Char('w') => app.toggle_autosave(),
+        KeyCode::Char(']') => { let mb = app.config.ring_buffer_mb + 256; app.set_ring_size_mb(mb); }
+        KeyCode::Char('[') => { let mb = app.config.ring_buffer_mb.saturating_sub(256).max(16); app.set_ring_size_mb(mb); }
         KeyCode::Char(' ') => app.acknowledge_alarm(),
         KeyCode::Char('?') => app.active_tab = ActiveTab::Help,
         KeyCode::Up | KeyCode::Char('k') => app.scroll_up(),
