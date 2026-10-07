@@ -100,8 +100,22 @@ pub struct ServerHandle {
 
 /// Starts the dashboard HTTP server on `port`, bound to all interfaces so the phone can reach it.
 /// Returns a handle with the LAN URL + token to show in the Connect screen, or None if binding fails.
+/// Max simultaneous dashboard connections, so a LAN peer can't exhaust threads by opening many
+/// (especially long-lived SSE) sockets.
+const MAX_CONN: usize = 48;
+static ACTIVE_CONN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Decrements the active-connection count when a handler ends (including SSE disconnects).
+struct ConnGuard;
+impl Drop for ConnGuard {
+    fn drop(&mut self) { ACTIVE_CONN.fetch_sub(1, Ordering::Relaxed); }
+}
+
 pub fn start(port: u16, shared: SharedJson) -> Option<ServerHandle> {
-    let token = random_token();
+    let Some(token) = random_token() else {
+        log::error!("Dashboard not started: secure randomness unavailable for the access token");
+        return None;
+    };
     let listener = match TcpListener::bind(("0.0.0.0", port)) {
         Ok(l) => l,
         Err(e) => { log::warn!("Dashboard server could not bind port {}: {}", port, e); return None; }
@@ -116,11 +130,22 @@ pub fn start(port: u16, shared: SharedJson) -> Option<ServerHandle> {
     std::thread::spawn(move || {
         for stream in listener.incoming() {
             if !running_srv.load(Ordering::Relaxed) { break; }
-            if let Ok(stream) = stream {
+            if let Ok(mut stream) = stream {
+                // Cap concurrent connections; reject politely when at the limit.
+                if ACTIVE_CONN.fetch_add(1, Ordering::Relaxed) >= MAX_CONN {
+                    ACTIVE_CONN.fetch_sub(1, Ordering::Relaxed);
+                    let _ = stream.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                    continue;
+                }
+                // Timeouts stop a slow/idle client from pinning a thread forever.
+                let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(15)));
                 let token = token_srv.clone();
                 let shared = shared.clone();
                 // One thread per connection; SSE connections stay open, so don't block the accept loop.
-                std::thread::spawn(move || handle_conn(stream, &token, &shared));
+                std::thread::spawn(move || {
+                    let _guard = ConnGuard;
+                    handle_conn(stream, &token, &shared);
+                });
             }
         }
     });
@@ -177,17 +202,12 @@ fn query_token(query: &str) -> String {
     query.split('&').find_map(|kv| kv.strip_prefix("t=")).unwrap_or("").to_string()
 }
 
-/// A URL-safe random token. Uses the OS randomness source; falls back to a time/pid mix if unavailable.
-fn random_token() -> String {
-    #[cfg(unix)]
-    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
-        let mut b = [0u8; 16];
-        if f.read_exact(&mut b).is_ok() {
-            return b.iter().map(|x| format!("{:02x}", x)).collect();
-        }
-    }
-    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-    format!("{:x}{:x}", t, std::process::id())
+/// A 128-bit URL-safe token from the OS cryptographic RNG. Returns None if secure randomness is
+/// unavailable — we refuse to serve with a guessable token rather than fall back to a weak one.
+fn random_token() -> Option<String> {
+    let mut b = [0u8; 16];
+    getrandom::getrandom(&mut b).ok()?;
+    Some(b.iter().map(|x| format!("{:02x}", x)).collect())
 }
 
 /// This machine's primary LAN IPv4 (for the URL the phone connects to), discovered by opening a UDP
@@ -199,6 +219,14 @@ fn lan_ip() -> Option<String> {
 }
 
 const DASHBOARD_HTML: &str = include_str!("dashboard.html");
+
+/// Renders `text` (the dashboard URL) as a scannable QR using half-block characters, so it fits in the
+/// terminal Connect screen. Returns None if the text is too long to encode.
+pub fn qr_text(text: &str) -> Option<String> {
+    use qrcode::{QrCode, render::unicode};
+    let code = QrCode::new(text.as_bytes()).ok()?;
+    Some(code.render::<unicode::Dense1x2>().quiet_zone(true).build())
+}
 
 #[cfg(test)]
 mod tests {

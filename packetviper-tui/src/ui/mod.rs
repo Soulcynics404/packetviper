@@ -97,21 +97,26 @@ pub fn render(f: &mut Frame, app: &App) {
     }
 }
 
-/// "See on another device" popup: the LAN URL (with token) to open PacketViper on a phone.
+/// "See on another device" popup: a scannable QR plus the LAN URL (with token) to open on a phone.
 fn render_connect(f: &mut Frame, area: Rect, app: &App) {
-    let w = area.width.min(74);
-    let h = area.height.min(12);
-    let popup = Rect::new(area.x + (area.width - w) / 2, area.y + (area.height - h) / 2, w, h);
-    f.render_widget(Clear, popup);
     let body = match &app.server {
-        Some(s) => format!(
-            "Open this on your phone or another device (same Wi-Fi):\n\n  {}\n\nAnyone with this link can view your monitor, so share only via\nthe QR/link. The token changes each run.\n\n[o] close",
-            s.url
-        ),
+        Some(s) => {
+            let qr = crate::server::qr_text(&s.url).unwrap_or_default();
+            format!(
+                "Scan with your phone camera (same Wi-Fi):\n\n{}\nOr open:  {}\n\nAnyone with this link can view your monitor — share only via this\nQR/link. The access token changes every run.   [o] close",
+                qr, s.url
+            )
+        }
         None => "Dashboard server is not running.\nEnable it in packetviper-config.json (\"http_enabled\": true) and restart.\n\n[o] close".to_string(),
     };
+    // Size the popup to the QR so it isn't clipped (QR is ~33 half-block rows wide/tall for this URL).
+    let content_w = body.lines().map(|l| l.chars().count()).max().unwrap_or(40) as u16 + 4;
+    let content_h = body.lines().count() as u16 + 2;
+    let w = content_w.min(area.width);
+    let h = content_h.min(area.height);
+    let popup = Rect::new(area.x + area.width.saturating_sub(w) / 2, area.y + area.height.saturating_sub(h) / 2, w, h);
+    f.render_widget(Clear, popup);
     let p = Paragraph::new(body)
-        .wrap(Wrap { trim: false })
         .block(Block::default().title(" 📱 Connect a device ").borders(Borders::ALL).border_style(Style::default().fg(app.theme.accent1).add_modifier(Modifier::BOLD)));
     f.render_widget(p, popup);
 }
