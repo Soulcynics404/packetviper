@@ -3,6 +3,12 @@ name: Release
 on:
   push:
     tags: ['v*']
+  # Rebuild an existing release by hand: Actions > Release > Run workflow.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build (e.g. v0.2.0)
+        required: true
 
 permissions:
   contents: read
@@ -19,10 +25,15 @@ jobs:
         include:
           - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, archive: tar.gz }
           - { os: macos-latest, target: aarch64-apple-darwin, archive: tar.gz }
-          - { os: macos-13, target: x86_64-apple-darwin, archive: tar.gz }
+          # Intel Macs: cross-compiled on the Apple Silicon runner (macos-13 Intel runners are retired).
+          - { os: macos-latest, target: x86_64-apple-darwin, archive: tar.gz }
           - { os: windows-latest, target: x86_64-pc-windows-msvc, archive: zip }
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
         with:
           targets: ${{ matrix.target }}
@@ -40,7 +51,7 @@ jobs:
       - name: Package (Unix)
         if: runner.os != 'Windows'
         run: |
-          name=packetviper-${{ github.ref_name }}-${{ matrix.target }}
+          name=packetviper-${{ env.TAG }}-${{ matrix.target }}
           mkdir "$name"
           cp target/${{ matrix.target }}/release/packetviper README.md LICENSE "$name"/
           tar czf "$name.tar.gz" "$name"
@@ -50,7 +61,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $name = "packetviper-${{ github.ref_name }}-${{ matrix.target }}"
+          $name = "packetviper-${{ env.TAG }}-${{ matrix.target }}"
           New-Item -ItemType Directory $name | Out-Null
           Copy-Item target/${{ matrix.target }}/release/packetviper.exe, README.md, LICENSE $name
           Compress-Archive $name "$name.zip"
@@ -58,4 +69,6 @@ jobs:
 
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
+          tag_name: ${{ env.TAG }}
           files: ${{ env.ASSET }}
+          overwrite_files: true
