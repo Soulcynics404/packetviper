@@ -12,7 +12,7 @@ impl SessionManager {
     /// Save packets to a session file
     pub fn save(packets: &[CapturedPacket], bookmarks: &[u64], path: &str) -> Result<String, String> {
         let session = SessionData {
-            version: "0.1.0".to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
             packet_count: packets.len(),
             bookmarks: bookmarks.to_vec(),
             packets: packets.to_vec(),

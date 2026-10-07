@@ -72,7 +72,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             "  ── About ──",
             Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD),
         )),
-        Line::from("   PacketViper v0.1.0"),
+        Line::from(concat!("   PacketViper v", env!("CARGO_PKG_VERSION"))),
         Line::from("   Network Traffic Analyzer + Threat Detector"),
         Line::from("   Rust + Ratatui + pnet + GeoIP"),
         Line::from("   Author: Harsshh (github.com/Soulcynics404)"),

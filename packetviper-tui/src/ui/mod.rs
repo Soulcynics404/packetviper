@@ -55,7 +55,7 @@ pub fn render(f: &mut Frame, app: &App) {
 
     let titles: Vec<Line> = ActiveTab::titles().iter().map(|t| Line::from(Span::styled(*t, Style::default().fg(app.theme.text)))).collect();
     let tabs = Tabs::new(titles)
-        .block(Block::default().borders(Borders::ALL).title(Span::styled(" 🐍 PacketViper ", Style::default().fg(app.theme.title).add_modifier(Modifier::BOLD))).border_style(Style::default().fg(app.theme.border)))
+        .block(Block::default().borders(Borders::ALL).title(Span::styled(concat!(" 🐍 PacketViper v", env!("CARGO_PKG_VERSION"), " "), Style::default().fg(app.theme.title).add_modifier(Modifier::BOLD))).border_style(Style::default().fg(app.theme.border)))
         .select(app.active_tab.index())
         .highlight_style(Style::default().fg(app.theme.selected_fg).bg(app.theme.border_highlight).add_modifier(Modifier::BOLD))
         .divider(Span::raw(" | "));
