@@ -264,14 +264,18 @@ fn sudo_user() -> Option<(u32, u32)> {
 /// phone URL for the Connect screen. No-op when the relay is disabled or has no URL.
 fn maybe_start_relay(config: &mut packetviper_core::config::Config, app: &mut App) {
     if !config.relay_enabled || config.relay_url.trim().is_empty() { return; }
-    if config.relay_code.is_empty() {
-        match server::gen_pair_code() {
-            Some(c) => { config.relay_code = c; let _ = config.save(); }
-            None => { log::warn!("Relay disabled: could not generate a pair code"); return; }
+    if config.relay_code.is_empty() || config.relay_push_key.is_empty() {
+        match (server::gen_pair_code(), server::gen_pair_code()) {
+            (Some(code), Some(key)) => {
+                if config.relay_code.is_empty() { config.relay_code = code; }
+                if config.relay_push_key.is_empty() { config.relay_push_key = key; }
+                let _ = config.save();
+            }
+            _ => { log::warn!("Relay disabled: could not generate secrets"); return; }
         }
     }
     let base = config.relay_url.trim_end_matches('/').to_string();
-    if server::start_relay_push(&base, &config.relay_code, app.server_json.clone()) {
+    if server::start_relay_push(&base, &config.relay_code, &config.relay_push_key, app.server_json.clone()) {
         app.relay_url = Some(format!("{}/r/{}", base, config.relay_code));
     }
 }
@@ -352,7 +356,16 @@ fn run_serve(iface: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     maybe_start_relay(&mut config, &mut app);
-    if let Some(u) = &app.relay_url { println!("Relay: open from anywhere:\n   {}", u); }
+    if let Some(u) = &app.relay_url {
+        use std::io::IsTerminal;
+        if std::io::stdout().is_terminal() {
+            println!("Relay: open from anywhere:\n   {}", u);
+        } else {
+            // Under a service, stdout goes to journald; write the secret link to the owner-only file.
+            let _ = write_private("packetviper-connect.txt", format!("LAN: {}\nRelay: {}\n", app.server.as_ref().map(|s| s.url.as_str()).unwrap_or("-"), u).as_bytes());
+            log::info!("Relay enabled; connect link written to packetviper-connect.txt");
+        }
+    }
     log::info!("serve: monitoring {} in the background (auto-defence={}, autosave={})", iface, config.auto_block, config.autosave);
 
     // Stop cleanly on Ctrl-C / SIGTERM so firewall rules are removed and the capture file is flushed.

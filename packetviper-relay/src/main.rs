@@ -22,7 +22,9 @@ const ROOM_TTL: Duration = Duration::from_secs(120); // drop a room whose laptop
 const MAX_CONN: usize = 256;
 static ACTIVE: AtomicUsize = AtomicUsize::new(0);
 
-struct Room { json: String, updated: Instant }
+/// `push_key` is set by the first laptop to push (trust-on-first-use) and required to match on every
+/// later push, so a leaked view link (`/r/<code>`) cannot write/spoof data into the room.
+struct Room { json: String, updated: Instant, push_key: String }
 type Rooms = Arc<Mutex<HashMap<String, Room>>>;
 
 const DASHBOARD_HTML: &str = include_str!("../../packetviper-tui/src/dashboard.html");
@@ -74,14 +76,19 @@ fn handle(mut stream: TcpStream, rooms: Rooms) {
     // /push/<code>
     if let Some(code) = path.strip_prefix("/push/") {
         if method != "POST" || !valid_code(code) { return send(&mut stream, "400 Bad Request", "text/plain", b"bad"); }
+        let push_key = header(&head, "x-push-key").unwrap_or_default();
+        if push_key.len() < 8 { return send(&mut stream, "401 Unauthorized", "text/plain", b"missing X-Push-Key"); }
         let body = read_body(&mut stream, &head, &buf[..n]);
         if body.len() > MAX_BODY { return send(&mut stream, "413 Payload Too Large", "text/plain", b"too big"); }
         if let Ok(mut map) = rooms.lock() {
             prune(&mut map);
-            if !map.contains_key(code) && map.len() >= MAX_ROOMS {
-                return send(&mut stream, "503 Service Unavailable", "text/plain", b"relay full");
+            match map.get(code) {
+                // Existing room: the push key must match the one that created it.
+                Some(r) if r.push_key != push_key => return send(&mut stream, "403 Forbidden", "text/plain", b"wrong push key"),
+                None if map.len() >= MAX_ROOMS => return send(&mut stream, "503 Service Unavailable", "text/plain", b"relay full"),
+                _ => {}
             }
-            map.insert(code.to_string(), Room { json: body, updated: Instant::now() });
+            map.insert(code.to_string(), Room { json: body, updated: Instant::now(), push_key });
         }
         return send(&mut stream, "200 OK", "application/json", b"{\"ok\":true}");
     }
@@ -103,14 +110,26 @@ fn handle(mut stream: TcpStream, rooms: Rooms) {
 fn stream_events(mut stream: TcpStream, rooms: Rooms, code: &str) {
     let headers = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\n\r\n";
     if stream.write_all(headers.as_bytes()).is_err() { return; }
+    let mut missing = 0u32;
     loop {
-        let body = rooms.lock().ok()
-            .and_then(|m| m.get(code).map(|r| r.json.clone()))
-            .unwrap_or_else(|| "{}".to_string());
-        let msg = format!("data: {}\n\n", body.replace('\n', " "));
+        let body = rooms.lock().ok().and_then(|m| m.get(code).map(|r| r.json.clone()));
+        // Don't let a client pin a slot by streaming a room that no laptop is pushing to.
+        match &body {
+            Some(_) => missing = 0,
+            None => { missing += 1; if missing > 15 { break; } }
+        }
+        let msg = format!("data: {}\n\n", body.unwrap_or_else(|| "{}".into()).replace('\n', " "));
         if stream.write_all(msg.as_bytes()).is_err() || stream.flush().is_err() { break; }
         std::thread::sleep(Duration::from_millis(1000));
     }
+}
+
+/// Case-insensitive lookup of a request header value.
+fn header(head: &str, name: &str) -> Option<String> {
+    head.lines().skip(1).find_map(|l| {
+        let (k, v) = l.split_once(':')?;
+        (k.trim().eq_ignore_ascii_case(name)).then(|| v.trim().to_string())
+    })
 }
 
 /// Reads the request body using Content-Length, continuing from what was already buffered.

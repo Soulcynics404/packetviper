@@ -260,16 +260,21 @@ const DASHBOARD_HTML: &str = include_str!("dashboard.html");
 /// Pushes the live snapshot to a relay server (`relay_url/push/<code>`) every ~2s, so the phone can
 /// see alerts off the LAN by opening `relay_url/r/<code>`. http:// only; one connection per push.
 /// Returns false if the relay URL is unusable.
-pub fn start_relay_push(relay_url: &str, code: &str, shared: SharedJson) -> bool {
+pub fn start_relay_push(relay_url: &str, code: &str, push_key: &str, shared: SharedJson) -> bool {
     let Some((host, port)) = parse_http_host(relay_url) else {
         log::warn!("Relay disabled: relay_url must look like http://host:port (got '{}')", relay_url);
         return false;
     };
-    let code = code.to_string();
-    log::info!("Relay push enabled to {}:{} (room {}...)", host, port, &code[..code.len().min(4)]);
+    // The push key and data travel in cleartext over http. Warn loudly for non-loopback hosts.
+    let loopback = host == "127.0.0.1" || host == "localhost" || host == "::1";
+    if !loopback {
+        log::warn!("Relay over plain HTTP to {} — traffic is unencrypted. Front the relay with HTTPS (Caddy) or use an SSH tunnel.", host);
+    }
+    let (code, push_key) = (code.to_string(), push_key.to_string());
+    log::info!("Relay push enabled to {}:{}", host, port);
     std::thread::spawn(move || loop {
         let body = shared.lock().map(|s| s.clone()).unwrap_or_default();
-        if let Err(e) = push_once(&host, port, &code, &body) {
+        if let Err(e) = push_once(&host, port, &code, &push_key, &body) {
             log::debug!("Relay push failed: {}", e);
         }
         std::thread::sleep(std::time::Duration::from_secs(2));
@@ -277,14 +282,15 @@ pub fn start_relay_push(relay_url: &str, code: &str, shared: SharedJson) -> bool
     true
 }
 
-/// One HTTP POST to the relay (std only; no TLS — http:// relays only).
-fn push_once(host: &str, port: u16, code: &str, body: &str) -> std::io::Result<()> {
+/// One HTTP POST to the relay (std only; no TLS — http:// relays only). The push key goes in a header,
+/// not the URL, and is required by the relay to write the room.
+fn push_once(host: &str, port: u16, code: &str, push_key: &str, body: &str) -> std::io::Result<()> {
     let mut stream = TcpStream::connect((host, port))?;
     stream.set_write_timeout(Some(std::time::Duration::from_secs(5)))?;
     stream.set_read_timeout(Some(std::time::Duration::from_secs(5)))?;
     let req = format!(
-        "POST /push/{} HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        code, host, body.len(), body
+        "POST /push/{} HTTP/1.1\r\nHost: {}\r\nX-Push-Key: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        code, host, push_key, body.len(), body
     );
     stream.write_all(req.as_bytes())?;
     let _ = stream.flush();
