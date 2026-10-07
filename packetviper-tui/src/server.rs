@@ -123,7 +123,9 @@ pub fn start(port: u16, shared: SharedJson) -> Option<ServerHandle> {
     let ip = lan_ip().unwrap_or_else(|| "127.0.0.1".to_string());
     let url = format!("http://{}:{}/?t={}", ip, port, token);
     let running = Arc::new(AtomicBool::new(true));
-    log::info!("Dashboard server on {}", url);
+    // Never log the token (logs persist / go to journald). The tokenized URL is shown only in the
+    // interactive Connect screen and TTY output.
+    log::info!("Dashboard server on http://{}:{}/ (token required; see Connect screen)", ip, port);
 
     let token_srv = token.clone();
     let running_srv = running.clone();
@@ -137,8 +139,10 @@ pub fn start(port: u16, shared: SharedJson) -> Option<ServerHandle> {
                     let _ = stream.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
                     continue;
                 }
-                // Timeouts stop a slow/idle client from pinning a thread forever.
+                // Timeouts stop a slow/idle client from pinning a thread forever. The write timeout
+                // matters for SSE: a client that stops reading would otherwise block write_all for good.
                 let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(15)));
+                let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(15)));
                 let token = token_srv.clone();
                 let shared = shared.clone();
                 // One thread per connection; SSE connections stay open, so don't block the accept loop.

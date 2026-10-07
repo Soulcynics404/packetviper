@@ -256,6 +256,20 @@ fn sudo_user() -> Option<(u32, u32)> {
     Some((id("SUDO_UID")?, id("SUDO_GID")?))
 }
 
+/// Writes `data` to `path` owner-readable only (0600 on Unix), refusing a symlinked path.
+fn write_private(path: &str, data: &[u8]) -> std::io::Result<()> {
+    if std::fs::symlink_metadata(path).map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+        return Err(std::io::Error::new(std::io::ErrorKind::Other, "refusing symlinked path"));
+    }
+    std::fs::write(path, data)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
 /// Headless monitor: capture + detect + alert + autosave with no terminal UI. Used by the autostart
 /// service so PacketViper can run in the background. Desktop danger alerts still fire (via tick()).
 /// Runs until the process is stopped (e.g. SIGTERM from the service manager).
@@ -299,7 +313,17 @@ fn run_serve(iface: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
     app.capturing = true;
     if config.http_enabled {
         if let Some(h) = server::start(config.http_port, app.server_json.clone()) {
-            println!("Dashboard: open on your phone (same Wi-Fi):\n   {}", h.url);
+            use std::io::IsTerminal;
+            if std::io::stdout().is_terminal() {
+                // Interactive run: safe to print the tokenized URL to the user's terminal.
+                println!("Dashboard: open on your phone (same Wi-Fi):\n   {}", h.url);
+            } else {
+                // Service run: stdout goes to journald, so write the token link to an owner-only file.
+                let path = "packetviper-connect.txt";
+                if write_private(path, h.url.as_bytes()).is_ok() {
+                    log::info!("Dashboard connect link written to {} (keep it private)", path);
+                }
+            }
             app.server = Some(h);
         }
     }
