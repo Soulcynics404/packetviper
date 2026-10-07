@@ -219,21 +219,21 @@ contains "google"                        # Text search in packet summary
 
 ### Option 1: Download a ready-made build
 
-Latest release: **[v0.2.0](https://github.com/Soulcynics404/packetviper/releases/tag/v0.2.0)** ([all releases](https://github.com/Soulcynics404/packetviper/releases))
+Latest release: **[v0.2.1](https://github.com/Soulcynics404/packetviper/releases/tag/v0.2.1)** ([all releases](https://github.com/Soulcynics404/packetviper/releases))
 
 | Platform | Download |
 |---|---|
-| 🐧 Linux (x86_64) | [packetviper-v0.2.0-x86_64-unknown-linux-gnu.tar.gz](https://github.com/Soulcynics404/packetviper/releases/download/v0.2.0/packetviper-v0.2.0-x86_64-unknown-linux-gnu.tar.gz) |
-| 🪟 Windows 10/11 (x86_64) | [packetviper-v0.2.0-x86_64-pc-windows-msvc.zip](https://github.com/Soulcynics404/packetviper/releases/download/v0.2.0/packetviper-v0.2.0-x86_64-pc-windows-msvc.zip) |
-| 🍎 macOS Apple Silicon (M1–M4) | [packetviper-v0.2.0-aarch64-apple-darwin.tar.gz](https://github.com/Soulcynics404/packetviper/releases/download/v0.2.0/packetviper-v0.2.0-aarch64-apple-darwin.tar.gz) |
-| 🍎 macOS Intel | [packetviper-v0.2.0-x86_64-apple-darwin.tar.gz](https://github.com/Soulcynics404/packetviper/releases/download/v0.2.0/packetviper-v0.2.0-x86_64-apple-darwin.tar.gz) |
+| 🐧 Linux (x86_64) | [packetviper-v0.2.1-x86_64-unknown-linux-gnu.tar.gz](https://github.com/Soulcynics404/packetviper/releases/download/v0.2.1/packetviper-v0.2.1-x86_64-unknown-linux-gnu.tar.gz) |
+| 🪟 Windows 10/11 (x86_64) | [packetviper-v0.2.1-x86_64-pc-windows-msvc.zip](https://github.com/Soulcynics404/packetviper/releases/download/v0.2.1/packetviper-v0.2.1-x86_64-pc-windows-msvc.zip) |
+| 🍎 macOS Apple Silicon (M1–M4) | [packetviper-v0.2.1-aarch64-apple-darwin.tar.gz](https://github.com/Soulcynics404/packetviper/releases/download/v0.2.1/packetviper-v0.2.1-aarch64-apple-darwin.tar.gz) |
+| 🍎 macOS Intel | [packetviper-v0.2.1-x86_64-apple-darwin.tar.gz](https://github.com/Soulcynics404/packetviper/releases/download/v0.2.1/packetviper-v0.2.1-x86_64-apple-darwin.tar.gz) |
 
 Extract the archive and run `packetviper` (or `packetviper.exe`) as shown in [Run](#run).
 
 ```bash
 # Linux / macOS example
-tar xzf packetviper-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
-cd packetviper-v0.2.0-x86_64-unknown-linux-gnu
+tar xzf packetviper-v0.2.1-x86_64-unknown-linux-gnu.tar.gz
+cd packetviper-v0.2.1-x86_64-unknown-linux-gnu
 sudo ./packetviper            # list interfaces
 sudo ./packetviper wlan0      # start capturing
 ```
