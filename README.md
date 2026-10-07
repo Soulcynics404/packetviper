@@ -211,7 +211,26 @@ contains "google"                        # Text search in packet summary
 
 ### Option 1: Download a ready-made build
 
-Grab the archive for your OS from the [Releases page](https://github.com/Soulcynics404/packetviper/releases), extract it, and run `packetviper` (or `packetviper.exe`) as shown below.
+Latest release: **[v0.2.0](https://github.com/Soulcynics404/packetviper/releases/tag/v0.2.0)** ([all releases](https://github.com/Soulcynics404/packetviper/releases))
+
+| Platform | Download |
+|---|---|
+| 🐧 Linux (x86_64) | [packetviper-v0.2.0-x86_64-unknown-linux-gnu.tar.gz](https://github.com/Soulcynics404/packetviper/releases/download/v0.2.0/packetviper-v0.2.0-x86_64-unknown-linux-gnu.tar.gz) |
+| 🪟 Windows 10/11 (x86_64) | [packetviper-v0.2.0-x86_64-pc-windows-msvc.zip](https://github.com/Soulcynics404/packetviper/releases/download/v0.2.0/packetviper-v0.2.0-x86_64-pc-windows-msvc.zip) |
+| 🍎 macOS Apple Silicon (M1–M4) | [packetviper-v0.2.0-aarch64-apple-darwin.tar.gz](https://github.com/Soulcynics404/packetviper/releases/download/v0.2.0/packetviper-v0.2.0-aarch64-apple-darwin.tar.gz) |
+| 🍎 macOS Intel | [packetviper-v0.2.0-x86_64-apple-darwin.tar.gz](https://github.com/Soulcynics404/packetviper/releases/download/v0.2.0/packetviper-v0.2.0-x86_64-apple-darwin.tar.gz) |
+
+Extract the archive and run `packetviper` (or `packetviper.exe`) as shown in [Run](#run).
+
+```bash
+# Linux / macOS example
+tar xzf packetviper-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
+cd packetviper-v0.2.0-x86_64-unknown-linux-gnu
+sudo ./packetviper            # list interfaces
+sudo ./packetviper wlan0      # start capturing
+```
+
+- **macOS:** the first run may be blocked by Gatekeeper because the binary isn't signed. Allow it in **System Settings → Privacy & Security**, or run `xattr -d com.apple.quarantine ./packetviper`.
 
 - **Windows:** first install [Npcap](https://npcap.com/#download) and tick **"Install Npcap in WinPcap API-compatible Mode"**.
 
