@@ -40,6 +40,11 @@ pub struct BandwidthMonitor {
     outgoing_bytes: u64,
     bandwidth_history: Vec<u64>,
     last_tick_bytes: u64,
+    last_tick_in: u64,
+    last_tick_out: u64,
+    in_rate: u64,
+    out_rate: u64,
+    peak_out_rate: u64,
     last_tick_time: std::time::Instant,
     start_time: std::time::Instant,
 }
@@ -60,6 +65,11 @@ impl BandwidthMonitor {
             outgoing_bytes: 0,
             bandwidth_history: Vec::new(),
             last_tick_bytes: 0,
+            last_tick_in: 0,
+            last_tick_out: 0,
+            in_rate: 0,
+            out_rate: 0,
+            peak_out_rate: 0,
             last_tick_time: now,
             start_time: now,
         }
@@ -131,6 +141,13 @@ impl BandwidthMonitor {
         }
     }
 
+    /// Current download rate in bytes/sec (updated each second by `tick`).
+    pub fn in_rate(&self) -> u64 { self.in_rate }
+    /// Current upload rate in bytes/sec.
+    pub fn out_rate(&self) -> u64 { self.out_rate }
+    /// Highest upload rate seen this session.
+    pub fn peak_out_rate(&self) -> u64 { self.peak_out_rate }
+
     /// Packets seen so far for a protocol name (as in `CapturedPacket::protocol`).
     pub fn protocol_count(&self, protocol: &str) -> u64 {
         self.protocol_counts.get(protocol).copied().unwrap_or(0)
@@ -145,13 +162,18 @@ impl BandwidthMonitor {
             let bytes_this_tick = self.total_bytes - self.last_tick_bytes;
             let bps = (bytes_this_tick as f64 / elapsed) as u64;
             self.bandwidth_history.push(bps);
-
-            // Keep last 60 samples (1 minute of data)
             if self.bandwidth_history.len() > 60 {
                 self.bandwidth_history.remove(0); // 60 elements, cheap
             }
 
+            // Instantaneous per-direction rate (bytes/sec) for the live speed meter.
+            self.in_rate = ((self.incoming_bytes - self.last_tick_in) as f64 / elapsed) as u64;
+            self.out_rate = ((self.outgoing_bytes - self.last_tick_out) as f64 / elapsed) as u64;
+            self.peak_out_rate = self.peak_out_rate.max(self.out_rate);
+
             self.last_tick_bytes = self.total_bytes;
+            self.last_tick_in = self.incoming_bytes;
+            self.last_tick_out = self.outgoing_bytes;
             self.last_tick_time = now;
         }
     }

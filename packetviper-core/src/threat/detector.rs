@@ -557,6 +557,9 @@ impl ThreatDetector {
     pub fn critical_count(&self) -> usize { self.alerts.iter().filter(|a| a.level.is_alarm()).count() }
 }
 
+/// Public wrapper for `is_public` so other modules (e.g. per-process exfiltration tracking) can reuse the rule.
+pub fn is_public_addr(ip: &str) -> bool { is_public(ip) }
+
 /// Public (internet) address: not private, loopback, link-local, CGNAT, multicast or unspecified.
 fn is_public(ip: &str) -> bool {
     match ip.parse::<IpAddr>() {

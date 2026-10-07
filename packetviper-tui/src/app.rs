@@ -18,6 +18,7 @@ use packetviper_core::packets::CapturedPacket;
 use packetviper_core::filters::engine::FilterEngine;
 use packetviper_core::stats::bandwidth::BandwidthMonitor;
 use packetviper_core::stats::connections::ConnectionTracker;
+use packetviper_core::stats::process::NetMonitor;
 use packetviper_core::threat::detector::{ThreatDetector, ThreatLevel};
 use packetviper_core::threat::geoip::GeoIpLookup;
 use packetviper_core::export::{Exporter, json::JsonExporter, csv::CsvExporter, pcap::PcapExporter};
@@ -114,6 +115,7 @@ pub struct App {
     pub filter_engine: FilterEngine,
     pub bandwidth_monitor: BandwidthMonitor,
     pub connection_tracker: ConnectionTracker,
+    pub net_monitor: NetMonitor,
     pub stream_tracker: StreamTracker,
     pub threat_detector: ThreatDetector,
     pub geoip: GeoIpLookup,
@@ -158,6 +160,7 @@ impl App {
             filter_engine: FilterEngine::new(),
             bandwidth_monitor: BandwidthMonitor::new(),
             connection_tracker: ConnectionTracker::new(),
+            net_monitor: NetMonitor::new(),
             stream_tracker: StreamTracker::new(),
             threat_detector: ThreatDetector::new(),
             geoip,
@@ -220,7 +223,8 @@ impl App {
         self.bandwidth_monitor.record_packet(&packet);
         self.threat_detector.analyze(&packet);
         self.connection_tracker.track_packet(&packet);
-        
+        self.net_monitor.record(&packet);
+
         if let Some(ref transport) = packet.layers.transport {
             if let packetviper_core::packets::transport::TransportLayerInfo::Tcp(ref tcp) = transport {
                 let src_ip = packetviper_core::packets::strip_port(&packet.source).to_string();

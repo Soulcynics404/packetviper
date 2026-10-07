@@ -15,19 +15,21 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
         .constraints([
             Constraint::Length(5),  // Bandwidth sparkline
             Constraint::Length(12), // Protocol + TCP flags
-            Constraint::Min(8),    // Top talkers
+            Constraint::Min(8),     // Top talkers (by IP)
+            Constraint::Length(10), // Top uploaders (by app)
         ])
         .split(area);
 
     // -- Bandwidth Sparkline --
     let bw_data: Vec<u64> = stats.bandwidth_history.clone();
-    let current_bps = bw_data.last().copied().unwrap_or(0);
     let sparkline = Sparkline::default()
         .block(
             Block::default()
                 .title(format!(
-                    " 📈 Bandwidth: {}/s | Avg: {}/s | Packets/s: {:.1} ",
-                    format_bytes(current_bps),
+                    " 📈 ▼ Down {}/s   ▲ Up {}/s   (peak up {}/s) | Avg {}/s | {:.0} pkt/s ",
+                    format_bytes(app.bandwidth_monitor.in_rate()),
+                    format_bytes(app.bandwidth_monitor.out_rate()),
+                    format_bytes(app.bandwidth_monitor.peak_out_rate()),
                     format_bytes(stats.bytes_per_second as u64),
                     stats.packets_per_second,
                 ))
@@ -232,5 +234,34 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
     );
 
     f.render_widget(conv_table, talker_chunks[2]);
+
+    render_uploaders(f, app, chunks[3]);
+}
+
+/// Per-application upload/download table, so a sudden upload spike can be traced to the app causing it.
+fn render_uploaders(f: &mut Frame, app: &App, area: Rect) {
+    if !app.net_monitor.is_available() {
+        let note = Paragraph::new(" Per-app traffic is Linux-only (needs root). Not available on this OS.")
+            .block(Block::default().title(" 📤 Top Uploaders (by app) ").borders(Borders::ALL)
+                .border_style(Style::default().fg(app.theme.border)));
+        f.render_widget(note, area);
+        return;
+    }
+    let rows: Vec<Row> = app.net_monitor.top_uploaders(8).iter().map(|p| {
+        let dests = p.remote_ips.len();
+        Row::new(vec![
+            Cell::from(format!(" {}", truncate(&p.name, 22))),
+            Cell::from(format!("{}", p.pid)),
+            Cell::from(Span::styled(format!("▲ {}", format_bytes(p.out_bytes)), Style::default().fg(app.theme.accent3))),
+            Cell::from(format!("▼ {}", format_bytes(p.in_bytes))),
+            Cell::from(format!("{} dst", dests)),
+        ])
+    }).collect();
+    let table = Table::new(rows, [Constraint::Min(16), Constraint::Length(7), Constraint::Length(14), Constraint::Length(14), Constraint::Length(8)])
+        .header(Row::new(vec![" App", "PID", "Uploaded", "Downloaded", "Internet"])
+            .style(Style::default().fg(app.theme.accent1).add_modifier(Modifier::BOLD)))
+        .block(Block::default().title(" 📤 Top Uploaders (by app) — watch the Uploaded column ").borders(Borders::ALL)
+            .border_style(Style::default().fg(app.theme.border)));
+    f.render_widget(table, area);
 }
 
