@@ -322,15 +322,40 @@ fn install_autostart(iface: Option<&str>) -> Result<(), Box<dyn std::error::Erro
         return Ok(());
     };
     let exe = std::env::current_exe()?;
-    let cwd = std::env::current_dir()?;
+
+    // The interface name is written into the unit file and run by root, so only accept a real,
+    // currently-present interface — never arbitrary text.
+    if !capture::list_interfaces().iter().any(|i| i.name == iface) {
+        eprintln!("Interface '{}' not found; refusing to install autostart for it.", iface);
+        return Ok(());
+    }
 
     #[cfg(target_os = "linux")]
     {
+        // Run root's service from root-owned locations only. Running the binary straight from a
+        // user-writable build directory would let a local user swap what root executes on boot.
+        let bin = "/usr/local/bin/packetviper";
+        let workdir = "/var/lib/packetviper";
+        if exe != std::path::Path::new(bin) {
+            if let Err(e) = std::fs::copy(&exe, bin) {
+                eprintln!("Could not install the binary to {} ({}). Run with sudo.", bin, e);
+                return Ok(());
+            }
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(bin, std::fs::Permissions::from_mode(0o755));
+        }
+        if let Err(e) = std::fs::create_dir_all(workdir) {
+            eprintln!("Could not create {} ({}). Run with sudo.", workdir, e);
+            return Ok(());
+        }
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(workdir, std::fs::Permissions::from_mode(0o700));
+        }
         let unit = format!(
             "[Unit]\nDescription=PacketViper network monitor\nAfter=network-online.target\nWants=network-online.target\n\n\
-             [Service]\nType=simple\nUser=root\nWorkingDirectory={cwd}\nExecStart={exe} serve {iface}\nRestart=on-failure\nRestartSec=5\n\n\
+             [Service]\nType=simple\nUser=root\nWorkingDirectory={workdir}\nExecStart={bin} serve {iface}\nRestart=on-failure\nRestartSec=5\n\n\
              [Install]\nWantedBy=multi-user.target\n",
-            cwd = cwd.display(), exe = exe.display(), iface = iface,
         );
         let path = "/etc/systemd/system/packetviper.service";
         if let Err(e) = std::fs::write(path, unit) {
@@ -341,12 +366,13 @@ fn install_autostart(iface: Option<&str>) -> Result<(), Box<dyn std::error::Erro
             && std::process::Command::new("systemctl").args(["enable", "--now", "packetviper"]).status().map(|s| s.success()).unwrap_or(false);
         if ok {
             println!("✅ Autostart enabled. PacketViper now monitors {} in the background on every boot.", iface);
-            println!("   Watch:  journalctl -u packetviper -f        (and the logs/ folder)");
-            println!("   Stop:   sudo systemctl stop packetviper");
-            println!("   Remove: sudo {} remove-autostart", exe.display());
-            println!("   Config/captures/logs are kept in: {}", cwd.display());
+            println!("   Binary:  {} (root-owned)", bin);
+            println!("   Data:    {} (config, logs/, captures/ for the service)", workdir);
+            println!("   Watch:   journalctl -u packetviper -f");
+            println!("   Stop:    sudo systemctl stop packetviper");
+            println!("   Remove:  sudo packetviper remove-autostart");
         } else {
-            eprintln!("Wrote the service file but systemctl enable failed. Check: systemctl status packetviper");
+            eprintln!("Installed files but systemctl enable failed. Check: systemctl status packetviper");
         }
     }
     #[cfg(not(target_os = "linux"))]
@@ -356,7 +382,6 @@ fn install_autostart(iface: Option<&str>) -> Result<(), Box<dyn std::error::Erro
         println!("   {} serve {}", exe.display(), iface);
         if cfg!(windows) { println!("Windows: create a Task Scheduler task 'At startup', run as Administrator."); }
         else { println!("macOS: add a LaunchDaemon that runs the command above."); }
-        let _ = cwd;
     }
     Ok(())
 }

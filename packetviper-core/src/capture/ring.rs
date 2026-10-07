@@ -41,7 +41,7 @@ impl RingWriter {
             Ok(m) if !m.is_dir() =>
                 return Err(std::io::Error::new(std::io::ErrorKind::Other, "capture path exists and is not a directory")),
             Ok(_) => {}
-            Err(_) => std::fs::create_dir_all(&dir)?,
+            Err(_) => create_private_dir(&dir)?,
         }
         let path = dir.join(format!("packetviper_capture_{:06}.pcap", 1));
         let writer = new_segment(&path)?;
@@ -110,13 +110,32 @@ impl RingWriter {
     pub fn segment_count(&self) -> usize { self.segments.len() }
 }
 
-/// Creates a new pcap segment file with its global header written. `create_new` (O_EXCL) means an
-/// existing file or symlink at this path is never opened/followed — important when running as root.
+/// Creates a new pcap segment file (owner-only) with its global header written. `create_new` (O_EXCL)
+/// means an existing file or symlink at this path is never opened/followed — important when running as
+/// root. Captures hold full packet contents, so they must not be world-readable.
 fn new_segment(path: &std::path::Path) -> std::io::Result<BufWriter<File>> {
-    let mut f = BufWriter::new(std::fs::OpenOptions::new().write(true).create_new(true).open(path)?);
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let mut f = BufWriter::new(opts.open(path)?);
     f.write_all(&PCAP_MAGIC)?;
     f.flush()?;
     Ok(f)
+}
+
+/// Creates the capture directory owner-only (0700 on Unix); full captures are sensitive.
+fn create_private_dir(dir: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        return std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir);
+    }
+    #[cfg(not(unix))]
+    std::fs::create_dir_all(dir)
 }
 
 /// Current time as (seconds, microseconds) since the Unix epoch, for the pcap record header.
