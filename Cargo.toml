@@ -8,7 +8,7 @@ resolver = "2"
 [workspace.package]
 version = "0.2.1"
 edition = "2021"
-authors = ["Harsshh <your_email@example.com>"]
+authors = ["Harsshh <harshraj0645@gmail.com>"]
 license = "MIT"
 description = "A blazing-fast TUI network traffic analyzer with threat detection"
 repository = "https://github.com/Soulcynics404/packetviper"
