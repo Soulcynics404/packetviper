@@ -311,7 +311,7 @@ On the **laptop**, set in `packetviper-config.json` (created on first run):
 
 Restart PacketViper. A pair code is generated and saved automatically; press `o` to get the "open from anywhere" QR/link for your phone.
 
-> **Security:** the relay uses plain HTTP, so the pair code and the summary data (no packet contents — just counts, rates, alert text, app names, IPs) travel unencrypted. For real use, front the relay with HTTPS (e.g. **Caddy**, which gets a free certificate automatically) or, simplest and fully encrypted with **no relay code at all**, use a reverse SSH tunnel:
+> **Security:** for encryption end to end, front the relay with **Caddy** (free auto-HTTPS) and set `relay_url` to the `https://` address — the laptop pushes over TLS (cert-verified) and the phone's browser uses HTTPS too. Plain `http://` still works but sends the pair code and summary data (no packet contents — just counts, rates, alert text, app names, IPs) unencrypted, so only use it on a trusted link. Simplest fully-encrypted option with **no relay at all** is a reverse SSH tunnel:
 > ```bash
 > # exposes your laptop's LAN dashboard via the EC2 box, encrypted over SSH:
 > ssh -R 0.0.0.0:8080:localhost:7373 user@<EC2-PUBLIC-IP>

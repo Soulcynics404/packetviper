@@ -269,52 +269,31 @@ const DASHBOARD_HTML: &str = include_str!("dashboard.html");
 /// see alerts off the LAN by opening `relay_url/r/<code>`. http:// only; one connection per push.
 /// Returns false if the relay URL is unusable.
 pub fn start_relay_push(relay_url: &str, code: &str, push_key: &str, shared: SharedJson) -> bool {
-    let Some((host, port)) = parse_http_host(relay_url) else {
-        log::warn!("Relay disabled: relay_url must look like http://host:port (got '{}')", relay_url);
+    let is_https = relay_url.starts_with("https://");
+    if !is_https && !relay_url.starts_with("http://") {
+        log::warn!("Relay disabled: relay_url must start with http:// or https:// (got '{}')", relay_url);
         return false;
-    };
-    // The push key and data travel in cleartext over http. Warn loudly for non-loopback hosts.
-    let loopback = host == "127.0.0.1" || host == "localhost" || host == "::1";
-    if !loopback {
-        log::warn!("Relay over plain HTTP to {} — traffic is unencrypted. Front the relay with HTTPS (Caddy) or use an SSH tunnel.", host);
     }
-    let (code, push_key) = (code.to_string(), push_key.to_string());
-    log::info!("Relay push enabled to {}:{}", host, port);
+    // https is encrypted end to end; plain http to a non-loopback host sends the key/data in cleartext.
+    if !is_https && !relay_url.contains("://127.0.0.1") && !relay_url.contains("://localhost") {
+        log::warn!("Relay over plain HTTP — traffic is unencrypted. Use an https:// relay (front it with Caddy) or an SSH tunnel.");
+    }
+    let url = format!("{}/push/{}", relay_url.trim_end_matches('/'), code);
+    let push_key = push_key.to_string();
+    // Short timeouts so a dead relay never backs up the push loop; rustls verifies the server cert.
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(8))
+        .build();
+    log::info!("Relay push enabled ({})", if is_https { "https, encrypted" } else { "http" });
     std::thread::spawn(move || loop {
         let body = shared.lock().map(|s| s.clone()).unwrap_or_default();
-        if let Err(e) = push_once(&host, port, &code, &push_key, &body) {
+        if let Err(e) = agent.post(&url).set("X-Push-Key", &push_key).set("Content-Type", "application/json").send_string(&body) {
             log::debug!("Relay push failed: {}", e);
         }
         std::thread::sleep(std::time::Duration::from_secs(2));
     });
     true
-}
-
-/// One HTTP POST to the relay (std only; no TLS — http:// relays only). The push key goes in a header,
-/// not the URL, and is required by the relay to write the room.
-fn push_once(host: &str, port: u16, code: &str, push_key: &str, body: &str) -> std::io::Result<()> {
-    let mut stream = TcpStream::connect((host, port))?;
-    stream.set_write_timeout(Some(std::time::Duration::from_secs(5)))?;
-    stream.set_read_timeout(Some(std::time::Duration::from_secs(5)))?;
-    let req = format!(
-        "POST /push/{} HTTP/1.1\r\nHost: {}\r\nX-Push-Key: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        code, host, push_key, body.len(), body
-    );
-    stream.write_all(req.as_bytes())?;
-    let _ = stream.flush();
-    let mut sink = [0u8; 256];
-    let _ = stream.read(&mut sink); // drain/ignore the response
-    Ok(())
-}
-
-/// Parses "http://host:port" (port optional, defaults 80). Returns None for https/other schemes.
-fn parse_http_host(url: &str) -> Option<(String, u16)> {
-    let rest = url.strip_prefix("http://")?;
-    let authority = rest.split('/').next().unwrap_or(rest);
-    match authority.rsplit_once(':') {
-        Some((h, p)) => Some((h.to_string(), p.parse().ok()?)),
-        None => Some((authority.to_string(), 80)),
-    }
 }
 
 /// Renders `text` (the dashboard URL) as a scannable QR using half-block characters, so it fits in the
