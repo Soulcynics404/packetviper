@@ -64,6 +64,8 @@ const FLOOD_THRESHOLD: usize = 200;
 const RATE_WINDOW_SECS: i64 = 10;
 const SCAN_PORT_THRESHOLD: usize = 15;
 const SCAN_WINDOW_SECS: i64 = 60;
+/// How recently the original MAC must have sent traffic to treat an IP's new MAC as a real ARP spoof.
+const MAC_ACTIVE_SECS: i64 = 120;
 /// Attempts on one sensitive port from one source within SCAN_WINDOW_SECS that count as brute force.
 const BRUTE_FORCE_THRESHOLD: usize = 10;
 /// Distinct source MACs within RATE_WINDOW_SECS that count as MAC flooding.
@@ -96,6 +98,9 @@ pub struct ThreatDetector {
     rate_tracker: HashMap<String, Vec<DateTime<Local>>>,
     access_attempts: HashMap<(String, u16), Vec<DateTime<Local>>>,
     mac_seen: HashMap<String, DateTime<Local>>,
+    /// Last time each MAC was seen sending traffic, to tell a real ARP spoof (victim's MAC still
+    /// active + attacker's MAC claiming its IP) from a device that simply changed its MAC (old MAC goes quiet).
+    mac_last_seen: HashMap<String, DateTime<Local>>,
     /// LAN MACs already caught spoofing/relaying, defended immediately when auto-defence is switched on.
     lan_attackers: HashSet<String>,
     dhcp_server: Option<String>,
@@ -128,7 +133,7 @@ impl ThreatDetector {
         let suspicious_ports = [4444, 5555, 6666, 6667, 1337, 31337, 12345, 27374, 9050, 9051].into_iter().collect();
         Self {
             alert_counter: 0, alerts: Vec::new(), syn_tracker: HashMap::new(), arp_first: HashMap::new(),
-            rate_tracker: HashMap::new(), access_attempts: HashMap::new(), mac_seen: HashMap::new(),
+            rate_tracker: HashMap::new(), access_attempts: HashMap::new(), mac_seen: HashMap::new(), mac_last_seen: HashMap::new(),
             lan_attackers: HashSet::new(), dhcp_server: None, ipv6_routers: HashSet::new(), dhcpv6_servers: HashSet::new(),
             last_alert: HashMap::new(), last_cleanup: Local::now(),
             active_blocks: HashMap::new(), failed_blocks: HashSet::new(), suspicious_ports,
@@ -287,6 +292,10 @@ impl ThreatDetector {
         if let Some(src) = packet.src_ip() {
             if self.active_blocks.contains_key(src) { return; }
         }
+        // Remember when each device's real MAC was last active (for the ARP-spoof vs MAC-change test).
+        if let Some(LinkLayerInfo::Ethernet(e)) = &packet.layers.link {
+            self.mac_last_seen.insert(e.src_mac.to_lowercase(), packet.timestamp);
+        }
         self.detect_port_scan(packet); self.detect_arp_spoof(packet); self.detect_dns_tunneling(packet); self.detect_suspicious_port(packet); self.detect_flood(packet);
         self.detect_mitm_path(packet); self.detect_icmp_redirect(packet); self.detect_rogue_dhcp(packet); self.detect_ipv6_router_attack(packet);
         self.detect_name_poisoning(packet); self.detect_remote_access(packet); self.detect_mac_flood(packet);
@@ -320,7 +329,17 @@ impl ThreatDetector {
         let mac = arp.sender_mac.to_lowercase();
         if self.is_trusted(&ip) || self.is_trusted(&mac) { return; } // user-trusted device
         let first = self.arp_first.entry(ip.clone()).or_insert_with(|| mac.clone()).clone();
-        if first == mac || !self.cooldown_ok("arp", &format!("{}|{}", ip, mac), packet.timestamp) { return; }
+        if first == mac { return; }
+        // Real spoof = the original MAC is still active while a different MAC claims its IP. If the
+        // original MAC has gone quiet, the device likely just changed its MAC — rebaseline, don't alarm.
+        // The gateway's baseline MAC is always treated as active so gateway impersonation still fires.
+        let original_active = self.gateway_mac() == Some(first.as_str())
+            || self.mac_last_seen.get(&first).is_some_and(|t| packet.timestamp.signed_duration_since(*t).num_seconds() <= MAC_ACTIVE_SECS);
+        if !original_active {
+            self.arp_first.insert(ip.clone(), mac.clone());
+            return;
+        }
+        if !self.cooldown_ok("arp", &format!("{}|{}", ip, mac), packet.timestamp) { return; }
 
         let details = format!("Real MAC (first seen): {} | Claimed by: {}", first, mac);
         if self.local_macs.contains(&mac) {
@@ -553,6 +572,8 @@ impl ThreatDetector {
         let cutoff = now - Duration::seconds(RATE_WINDOW_SECS);
         self.rate_tracker.retain(|_, v| { v.retain(|t| *t > cutoff); !v.is_empty() });
         self.mac_seen.retain(|_, t| *t > cutoff);
+        let mac_cutoff = now - Duration::seconds(MAC_ACTIVE_SECS);
+        self.mac_last_seen.retain(|_, t| *t > mac_cutoff);
         let access_cutoff = now - Duration::seconds(SCAN_WINDOW_SECS);
         self.access_attempts.retain(|_, v| { v.retain(|t| *t > access_cutoff); !v.is_empty() });
         self.last_alert.retain(|_, t| now.signed_duration_since(*t).num_seconds() < ALERT_COOLDOWN_SECS);
@@ -662,10 +683,22 @@ mod tests {
     #[test]
     fn arp_spoofing_from_this_pc_is_not_an_alarm() {
         let mut d = detector();
+        // Victim .33 is actively sending traffic (its real MAC is "live"), then its IP is spoofed.
+        d.analyze(&packet(PacketDirection::Incoming, eth("fe:93:a7:ea:19:aa"), Some(ipv4("192.168.1.33", ME)), None, "TCP"));
         d.analyze(&arp_reply("192.168.1.33", "fe:93:a7:ea:19:aa"));
         d.analyze(&arp_reply("192.168.1.33", MY_MAC));
         assert_eq!(last(&d).category, "ARP Spoofing (this PC)");
         assert!(!last(&d).level.is_alarm());
+    }
+
+    #[test]
+    fn mac_change_when_old_mac_idle_is_not_flagged() {
+        let mut d = detector();
+        // A device claims .50, then a different MAC claims .50 — but the old MAC never sent traffic,
+        // so it's a MAC change (e.g. private/randomized MAC), not a live spoof. No alert.
+        d.analyze(&arp_reply("192.168.1.50", "aa:aa:aa:aa:aa:aa"));
+        d.analyze(&arp_reply("192.168.1.50", "bb:bb:bb:bb:bb:bb"));
+        assert!(d.alerts.is_empty(), "idle-MAC change must not alarm");
     }
 
     #[test]
