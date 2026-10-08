@@ -39,6 +39,9 @@ pub struct Config {
     pub exfil_alert: bool,
     /// Per-app upload-rate threshold in MB/s that counts as suspicious exfiltration.
     pub exfil_mb_per_s: u64,
+    /// Devices you trust (MAC or IP strings): never alerted on and never blocked. Use for your own
+    /// gear, mesh nodes, etc. that otherwise look suspicious (e.g. change MAC legitimately).
+    pub trusted: Vec<String>,
 }
 
 impl Default for Config {
@@ -56,6 +59,7 @@ impl Default for Config {
             relay_push_key: String::new(),
             exfil_alert: true,
             exfil_mb_per_s: 5,
+            trusted: Vec::new(),
         }
     }
 }

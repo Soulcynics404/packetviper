@@ -86,6 +86,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.config = config.clone();
     app.threat_detector.set_local_ips(interfaces.iter().flat_map(|i| i.ips.clone()));
     app.threat_detector.set_local_macs(interfaces.iter().filter_map(|i| i.mac.clone()));
+    app.threat_detector.set_trusted(config.trusted.clone());
     match packetviper_core::platform::default_gateway(&interface_name) {
         Some((ip, mac)) => app.threat_detector.set_gateway(&interface_name, &ip, &mac),
         None => log::warn!("No default gateway found on {}: gateway-spoofing and MITM-relay detection are off", interface_name),
@@ -319,6 +320,7 @@ fn run_serve(iface: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
     app.config = config.clone();
     app.threat_detector.set_local_ips(interfaces.iter().flat_map(|i| i.ips.clone()));
     app.threat_detector.set_local_macs(interfaces.iter().filter_map(|i| i.mac.clone()));
+    app.threat_detector.set_trusted(config.trusted.clone());
     if let Some((ip, mac)) = packetviper_core::platform::default_gateway(iface) {
         app.threat_detector.set_gateway(iface, &ip, &mac);
     }

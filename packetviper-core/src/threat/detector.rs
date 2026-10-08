@@ -108,6 +108,8 @@ pub struct ThreatDetector {
     suspicious_ports: HashSet<u16>,
     local_ips: HashSet<String>,
     local_macs: HashSet<String>,
+    /// User-trusted MACs/IPs (lowercased): never alerted on, never blocked.
+    trusted: HashSet<String>,
     /// Default gateway (interface, IP, MAC) read from the system at startup, before any attack could change it.
     pub gateway: Option<(String, String, String)>,
     /// Off by default: detections only alert. When on, attackers get blocked and the gateway gets pinned.
@@ -130,7 +132,7 @@ impl ThreatDetector {
             lan_attackers: HashSet::new(), dhcp_server: None, ipv6_routers: HashSet::new(), dhcpv6_servers: HashSet::new(),
             last_alert: HashMap::new(), last_cleanup: Local::now(),
             active_blocks: HashMap::new(), failed_blocks: HashSet::new(), suspicious_ports,
-            local_ips: HashSet::new(), local_macs: HashSet::new(), gateway: None, auto_block: false, firewall_available: false,
+            local_ips: HashSet::new(), local_macs: HashSet::new(), trusted: HashSet::new(), gateway: None, auto_block: false, firewall_available: false,
         }
     }
 
@@ -142,6 +144,16 @@ impl ThreatDetector {
     /// MACs of this machine. Never blocked; ARP claims from them are reported as "from this machine".
     pub fn set_local_macs(&mut self, macs: impl IntoIterator<Item = String>) {
         self.local_macs = macs.into_iter().map(|m| m.to_lowercase()).collect();
+    }
+
+    /// MACs/IPs the user trusts; these are never alerted on and never blocked.
+    pub fn set_trusted(&mut self, items: impl IntoIterator<Item = String>) {
+        self.trusted = items.into_iter().map(|s| s.trim().to_lowercase()).filter(|s| !s.is_empty()).collect();
+    }
+
+    /// Whether `id` (an IP or MAC) is on the user's trusted list.
+    fn is_trusted(&self, id: &str) -> bool {
+        self.trusted.contains(&id.to_lowercase())
     }
 
     /// Baseline gateway. Its IP->MAC mapping seeds the ARP table so a later impersonation is caught.
@@ -174,7 +186,7 @@ impl ThreatDetector {
     /// Adds a firewall rule dropping `ip`. Returns true if the IP is blocked afterwards.
     pub fn block_ip(&mut self, ip: &str, reason: &str) -> bool {
         if self.active_blocks.contains_key(ip) { return true; }
-        if self.is_protected(ip) || self.failed_blocks.contains(ip) { return false; }
+        if self.is_protected(ip) || self.is_trusted(ip) || self.failed_blocks.contains(ip) { return false; }
         if platform::block_ip(ip) {
             log::warn!("FIREWALL BLOCK IP {} — {}", ip, reason);
             self.record_block(ip, BlockKind::Ip, reason);
@@ -192,7 +204,7 @@ impl ThreatDetector {
         let mac = mac.to_lowercase();
         if self.active_blocks.contains_key(&mac) { return true; }
         if !platform::mac_blocking_supported() { return false; }
-        if self.local_macs.contains(&mac) || self.gateway_mac() == Some(mac.as_str()) || !is_mac(&mac) || self.failed_blocks.contains(&mac) { return false; }
+        if self.local_macs.contains(&mac) || self.is_trusted(&mac) || self.gateway_mac() == Some(mac.as_str()) || !is_mac(&mac) || self.failed_blocks.contains(&mac) { return false; }
         if platform::block_mac(&mac) {
             log::warn!("FIREWALL BLOCK MAC {} — {}", mac, reason);
             self.record_block(&mac, BlockKind::Mac, reason);
@@ -306,6 +318,7 @@ impl ThreatDetector {
         if arp.sender_ip == "0.0.0.0" { return; } // ARP probe: claims nothing
         let ip = arp.sender_ip.clone();
         let mac = arp.sender_mac.to_lowercase();
+        if self.is_trusted(&ip) || self.is_trusted(&mac) { return; } // user-trusted device
         let first = self.arp_first.entry(ip.clone()).or_insert_with(|| mac.clone()).clone();
         if first == mac || !self.cooldown_ok("arp", &format!("{}|{}", ip, mac), packet.timestamp) { return; }
 
@@ -689,6 +702,15 @@ mod tests {
         assert_eq!(last(&d).category, "Remote Access Attempt");
         for _ in 0..BRUTE_FORCE_THRESHOLD { d.analyze(&p); }
         assert_eq!(last(&d).category, "Brute Force");
+    }
+
+    #[test]
+    fn trusted_device_is_never_flagged_or_blocked() {
+        let mut d = detector();
+        d.set_trusted([EVIL_MAC.to_string()]);
+        d.analyze(&arp_reply(GW, EVIL_MAC)); // would be Critical gateway spoofing if not trusted
+        assert!(d.alerts.is_empty(), "trusted MAC must not raise an alert");
+        assert!(!d.block_mac(EVIL_MAC, "test"), "trusted MAC must not be blockable");
     }
 
     #[test]
