@@ -66,6 +66,9 @@ const SCAN_PORT_THRESHOLD: usize = 15;
 const SCAN_WINDOW_SECS: i64 = 60;
 /// How recently the original MAC must have sent traffic to treat an IP's new MAC as a real ARP spoof.
 const MAC_ACTIVE_SECS: i64 = 120;
+/// Right after startup, record the normal routers/DHCP/IPv6 servers as baseline instead of alerting,
+/// so a mesh network or legitimate ISP IPv6 seen at launch doesn't look like a rogue appearing.
+const LEARNING_SECS: i64 = 60;
 /// Attempts on one sensitive port from one source within SCAN_WINDOW_SECS that count as brute force.
 const BRUTE_FORCE_THRESHOLD: usize = 10;
 /// Distinct source MACs within RATE_WINDOW_SECS that count as MAC flooding.
@@ -101,6 +104,8 @@ pub struct ThreatDetector {
     /// Last time each MAC was seen sending traffic, to tell a real ARP spoof (victim's MAC still
     /// active + attacker's MAC claiming its IP) from a device that simply changed its MAC (old MAC goes quiet).
     mac_last_seen: HashMap<String, DateTime<Local>>,
+    /// Timestamp of the first analyzed packet, for the startup learning window.
+    first_packet: Option<DateTime<Local>>,
     /// LAN MACs already caught spoofing/relaying, defended immediately when auto-defence is switched on.
     lan_attackers: HashSet<String>,
     dhcp_server: Option<String>,
@@ -133,7 +138,7 @@ impl ThreatDetector {
         let suspicious_ports = [4444, 5555, 6666, 6667, 1337, 31337, 12345, 27374, 9050, 9051].into_iter().collect();
         Self {
             alert_counter: 0, alerts: Vec::new(), syn_tracker: HashMap::new(), arp_first: HashMap::new(),
-            rate_tracker: HashMap::new(), access_attempts: HashMap::new(), mac_seen: HashMap::new(), mac_last_seen: HashMap::new(),
+            rate_tracker: HashMap::new(), access_attempts: HashMap::new(), mac_seen: HashMap::new(), mac_last_seen: HashMap::new(), first_packet: None,
             lan_attackers: HashSet::new(), dhcp_server: None, ipv6_routers: HashSet::new(), dhcpv6_servers: HashSet::new(),
             last_alert: HashMap::new(), last_cleanup: Local::now(),
             active_blocks: HashMap::new(), failed_blocks: HashSet::new(), suspicious_ports,
@@ -183,6 +188,12 @@ impl ThreatDetector {
     /// Source addresses are spoofable, so blocking these could cut off the gateway or this host.
     pub fn is_protected(&self, ip: &str) -> bool {
         self.local_ips.contains(ip) || !is_public(ip)
+    }
+
+    /// True during the startup learning window, when new routers/DHCP/IPv6 servers are recorded as
+    /// baseline instead of alerting.
+    fn in_learning(&self, now: DateTime<Local>) -> bool {
+        self.first_packet.is_none_or(|t| now.signed_duration_since(t).num_seconds() < LEARNING_SECS)
     }
 
     fn gateway_mac(&self) -> Option<&str> { self.gateway.as_ref().map(|(_, _, m)| m.as_str()) }
@@ -292,6 +303,7 @@ impl ThreatDetector {
         if let Some(src) = packet.src_ip() {
             if self.active_blocks.contains_key(src) { return; }
         }
+        self.first_packet.get_or_insert(packet.timestamp);
         // Remember when each device's real MAC was last active (for the ARP-spoof vs MAC-change test).
         if let Some(LinkLayerInfo::Ethernet(e)) = &packet.layers.link {
             self.mac_last_seen.insert(e.src_mac.to_lowercase(), packet.timestamp);
@@ -393,6 +405,7 @@ impl ThreatDetector {
         match expected {
             None => self.dhcp_server = Some(server),
             Some(exp) if exp != server => {
+                if self.in_learning(packet.timestamp) { return; } // baseline extra DHCP servers at startup
                 if self.cooldown_ok("dhcp", &server, packet.timestamp) {
                     self.add_alert(ThreatLevel::High, "Rogue DHCP", &format!("DHCP {} from {} — expected your router {}. It may give you a fake gateway/DNS", d.message_type, server, exp), &server, &format!("Offered IP: {}", d.your_ip.as_deref().unwrap_or("-")));
                 }
@@ -408,7 +421,8 @@ impl ThreatDetector {
             if i.icmp_type == 134 {
                 let src = i.src_ip.clone();
                 let known = !self.ipv6_routers.is_empty();
-                if self.ipv6_routers.insert(src.clone()) && known {
+                let learning = self.in_learning(packet.timestamp);
+                if self.ipv6_routers.insert(src.clone()) && known && !learning {
                     self.add_alert(ThreatLevel::High, "Rogue IPv6 Router", &format!("New IPv6 router advertisement from {} — possible mitm6/rogue router", src), &src, &format!("Routers seen: {}", self.ipv6_routers.len()));
                 }
             }
@@ -416,7 +430,7 @@ impl ThreatDetector {
         if let Some(TransportLayerInfo::Udp(u)) = &packet.layers.transport {
             if u.src_port == 547 && u.dst_port == 546 {
                 let src = packet.src_ip().unwrap_or(&packet.source).to_string();
-                if self.dhcpv6_servers.insert(src.clone()) {
+                if self.dhcpv6_servers.insert(src.clone()) && !self.in_learning(packet.timestamp) {
                     let (level, extra) = if self.dhcpv6_servers.len() > 1 { (ThreatLevel::High, "a second server appeared") } else { (ThreatLevel::Medium, "unexpected on most home networks; mitm6 uses this") };
                     self.add_alert(level, "DHCPv6 Server", &format!("DHCPv6 server at {} ({})", src, extra), &src, "mitm6 answers DHCPv6 to become your DNS server");
                 }
