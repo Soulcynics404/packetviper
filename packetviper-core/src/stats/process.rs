@@ -143,11 +143,20 @@ use crate::packets::transport::TransportLayerInfo;
 /// Upper bound on tracked processes, so PID churn or spoofing can't grow memory without limit.
 const MAX_PROCS: usize = 4096;
 
+/// A process that has been uploading to the internet fast enough, long enough, to flag.
+#[derive(Debug, Clone)]
+pub struct ExfilEvent { pub name: String, pub pid: u32, pub bytes_per_sec: u64, pub dests: usize }
+
 pub struct NetMonitor {
     resolver: ProcessResolver,
     by_pid: HashMap<u32, ProcTraffic>,
     /// Bytes we could not attribute to any process (e.g. refresh missed a short-lived socket).
     pub unattributed_out: u64,
+    /// Per-pid upload total at the last exfil poll, to compute a rate.
+    prev_out: HashMap<u32, u64>,
+    /// Consecutive seconds each pid has been over the threshold (needs a sustained run to alert).
+    high_secs: HashMap<u32, u32>,
+    last_poll: Option<DateTime<Local>>,
 }
 
 impl Default for NetMonitor {
@@ -156,7 +165,48 @@ impl Default for NetMonitor {
 
 impl NetMonitor {
     pub fn new() -> Self {
-        Self { resolver: ProcessResolver::new(), by_pid: HashMap::new(), unattributed_out: 0 }
+        Self {
+            resolver: ProcessResolver::new(),
+            by_pid: HashMap::new(),
+            unattributed_out: 0,
+            prev_out: HashMap::new(),
+            high_secs: HashMap::new(),
+            last_poll: None,
+        }
+    }
+
+    /// Once a second, computes each process's upload rate and returns those that have been over
+    /// `threshold_bps` to public destinations for `sustain_secs` in a row. Returns empty between polls
+    /// or before a sustained run, so brief spikes (a page load) don't alarm.
+    pub fn poll_exfil(&mut self, now: DateTime<Local>, threshold_bps: u64, sustain_secs: u32) -> Vec<ExfilEvent> {
+        let elapsed = match self.last_poll { Some(t) => now.signed_duration_since(t).num_milliseconds(), None => { self.last_poll = Some(now); self.snapshot_out(); return Vec::new(); } };
+        if elapsed < 1000 { return Vec::new(); }
+        self.last_poll = Some(now);
+        let secs = (elapsed as f64 / 1000.0).max(1.0);
+        let mut events = Vec::new();
+        for (pid, t) in &self.by_pid {
+            let prev = self.prev_out.get(pid).copied().unwrap_or(t.out_bytes);
+            let rate = ((t.out_bytes.saturating_sub(prev)) as f64 / secs) as u64;
+            let over = rate >= threshold_bps && !t.remote_ips.is_empty();
+            let run = self.high_secs.entry(*pid).or_insert(0);
+            if over {
+                *run += 1;
+                if *run >= sustain_secs {
+                    events.push(ExfilEvent { name: t.name.clone(), pid: *pid, bytes_per_sec: rate, dests: t.remote_ips.len() });
+                    *run = 0; // reset so it re-arms rather than firing every second
+                }
+            } else {
+                *run = 0;
+            }
+        }
+        self.high_secs.retain(|_, r| *r > 0);
+        self.snapshot_out();
+        events
+    }
+
+    /// Records the current per-pid upload totals as the baseline for the next rate calculation.
+    fn snapshot_out(&mut self) {
+        self.prev_out = self.by_pid.iter().map(|(p, t)| (*p, t.out_bytes)).collect();
     }
 
     pub fn is_available(&self) -> bool { self.resolver.is_available() }
@@ -203,6 +253,56 @@ impl NetMonitor {
         v.sort_by(|a, b| b.out_bytes.cmp(&a.out_bytes));
         v.truncate(n);
         v
+    }
+}
+
+#[cfg(test)]
+mod exfil_tests {
+    use super::*;
+    use chrono::Duration;
+
+    fn proc(pid: u32, out: u64) -> ProcTraffic {
+        ProcTraffic { name: format!("p{}", pid), pid, out_bytes: out, in_bytes: 0,
+            remote_ips: ["8.8.8.8".to_string()].into_iter().collect() }
+    }
+
+    #[test]
+    fn sustained_upload_flags_after_run() {
+        let mut nm = NetMonitor::new();
+        let t0 = chrono::Local::now();
+        nm.by_pid.insert(42, proc(42, 0));
+        assert!(nm.poll_exfil(t0, 1000, 3).is_empty(), "first poll is just the baseline");
+        let mut ev = Vec::new();
+        for i in 1..=3 {
+            nm.by_pid.get_mut(&42).unwrap().out_bytes += 5000; // 5000 B/s, threshold 1000
+            ev = nm.poll_exfil(t0 + Duration::seconds(i), 1000, 3);
+        }
+        assert_eq!(ev.len(), 1, "3 sustained seconds should flag once");
+        assert_eq!(ev[0].pid, 42);
+    }
+
+    #[test]
+    fn brief_spike_is_ignored() {
+        let mut nm = NetMonitor::new();
+        let t0 = chrono::Local::now();
+        nm.by_pid.insert(7, proc(7, 0));
+        nm.poll_exfil(t0, 1000, 3);
+        nm.by_pid.get_mut(&7).unwrap().out_bytes += 5000;
+        let e1 = nm.poll_exfil(t0 + Duration::seconds(1), 1000, 3); // one high second
+        let e2 = nm.poll_exfil(t0 + Duration::seconds(2), 1000, 3); // then idle -> counter resets
+        assert!(e1.is_empty() && e2.is_empty(), "a one-second spike must not alarm");
+    }
+
+    #[test]
+    fn upload_without_public_dest_ignored() {
+        let mut nm = NetMonitor::new();
+        let t0 = chrono::Local::now();
+        let mut p = proc(9, 0); p.remote_ips.clear(); // only LAN/no internet dests
+        nm.by_pid.insert(9, p);
+        nm.poll_exfil(t0, 1000, 3);
+        let mut ev = Vec::new();
+        for i in 1..=4 { nm.by_pid.get_mut(&9).unwrap().out_bytes += 9000; ev = nm.poll_exfil(t0 + Duration::seconds(i), 1000, 3); }
+        assert!(ev.is_empty(), "no internet destination -> not exfiltration");
     }
 }
 

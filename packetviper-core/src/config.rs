@@ -35,6 +35,10 @@ pub struct Config {
     /// Push key: the single relay secret (laptop-only); generated if empty. The phone's view code is
     /// derived from it as sha256(key), so it is not stored separately.
     pub relay_push_key: String,
+    /// Raise a danger alarm when one app uploads to the internet faster than this, sustained (on by default).
+    pub exfil_alert: bool,
+    /// Per-app upload-rate threshold in MB/s that counts as suspicious exfiltration.
+    pub exfil_mb_per_s: u64,
 }
 
 impl Default for Config {
@@ -50,6 +54,8 @@ impl Default for Config {
             relay_enabled: false,
             relay_url: String::new(),
             relay_push_key: String::new(),
+            exfil_alert: true,
+            exfil_mb_per_s: 5,
         }
     }
 }

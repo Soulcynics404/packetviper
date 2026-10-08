@@ -279,8 +279,20 @@ impl App {
 
     pub fn tick(&mut self) {
         self.bandwidth_monitor.tick();
+        self.check_exfiltration();
         self.check_new_alerts();
         self.refresh_dashboard();
+    }
+
+    /// Flags any app that's been uploading to the internet over the configured threshold (raises a
+    /// High alert, which triggers the danger alarm). Off when `exfil_alert` is disabled.
+    fn check_exfiltration(&mut self) {
+        if !self.config.exfil_alert { return; }
+        let threshold = self.config.exfil_mb_per_s.saturating_mul(1024 * 1024); // MB/s -> bytes/s
+        let now = chrono::Local::now();
+        for e in self.net_monitor.poll_exfil(now, threshold, 5) {
+            self.threat_detector.raise_exfiltration(&e.name, e.pid, e.bytes_per_sec, e.dests, now);
+        }
     }
 
     /// Rebuilds the JSON snapshot the phone dashboard reads.

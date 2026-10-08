@@ -550,6 +550,20 @@ impl ThreatDetector {
         }
     }
 
+    /// Raises a High alert (so the danger alarm fires) for an app uploading a lot to the internet.
+    /// Deduped per app so it won't repeat every second. `bytes_per_sec`/`dests` describe the upload.
+    pub fn raise_exfiltration(&mut self, app: &str, pid: u32, bytes_per_sec: u64, dests: usize, now: DateTime<Local>) {
+        if !self.cooldown_ok("exfil", &format!("{}|{}", app, pid), now) { return; }
+        let kb = bytes_per_sec / 1024;
+        self.add_alert(
+            ThreatLevel::High,
+            "Data Exfiltration",
+            &format!("{} is uploading {} KB/s to {} internet host(s) — check if this is expected", app, kb, dests),
+            app,
+            &format!("pid {}, {} KB/s sustained", pid, kb),
+        );
+    }
+
     /// Id of the newest alert (0 if none). Lets the UI notice new alerts.
     pub fn last_alert_id(&self) -> u64 { self.alert_counter }
     pub fn alert_count(&self) -> usize { self.alerts.len() }
