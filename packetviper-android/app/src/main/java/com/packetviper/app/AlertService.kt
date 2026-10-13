@@ -28,8 +28,11 @@ fun eventsUrl(link: String): String? {
     if (u.scheme != "http" && u.scheme != "https" || u.host.isNullOrEmpty()) return null
     val base = "${u.scheme}://${u.rawAuthority}"
     val path = u.rawPath.orEmpty().trimEnd('/')
-    return if (path.startsWith("/r/")) "$base$path/events"
-    else u.rawQuery?.takeIf { it.isNotEmpty() }?.let { "$base/api/events?$it" }
+    // Only the two shapes the laptop hands out, so a stray QR (shop, menu) is rejected:
+    // relay `/r/<hex room code>`, or LAN root with a `t=<token>` query.
+    if (Regex("/r/[0-9a-fA-F]+").matches(path)) return "$base$path/events"
+    val hasToken = u.rawQuery.orEmpty().split('&').any { it.startsWith("t=") && it.length > 2 }
+    return if (path.isEmpty() && hasToken) "$base/api/events?${u.rawQuery}" else null
 }
 
 /**
