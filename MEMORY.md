@@ -9,7 +9,8 @@ Read this first in a new session, with `PRODUCT.md` (what it is) and `TECHSTACK.
   symlink/permission hardening, background `serve` + opt-in autostart, phone web dashboard + QR +
   token, phone control, relay (`packetviper-relay`) + HTTPS push, exfiltration alarm, trusted-devices
   list, smarter ARP, startup learning window.
-- Phases 1 and 2 are complete. **Phase 3 = the native Android app, not started** (see `docs/ANDROID_PLAN.md`).
+- Phases 1 and 2 are complete. **Phase 3 = native Android app: M1 (companion) built** in `packetviper-android/`
+  (`./gradlew testDebugUnitTest assembleDebug` green, 3 tests). Not yet tested on a real phone. M2/M3 not started.
 
 ## Hard rules (do not violate)
 - **No AI/assistant attribution** anywhere: not in commit messages, PR descriptions, README, code
@@ -39,8 +40,9 @@ Read this first in a new session, with `PRODUCT.md` (what it is) and `TECHSTACK.
 1. **Live end-to-end test** (user runs): `cargo build --release && sudo ./target/release/packetviper wlan0`.
    - Verify `o` (Connect QR), open on phone (same Wi-Fi), danger alarm via a High/Critical trigger from
      a **second device** (e.g. `nmap -sS -p 22,445 <laptop-ip>`). Same-machine bettercap is Medium (no alarm).
-2. **Native Android app — Milestone 1 (companion)**: see `docs/ANDROID_PLAN.md`. SDK is installed
-   (android-34, build-tools 34, Gradle 8.9 cached); NDK + cargo-ndk needed for M2 (standalone).
+2. **Android M1 on-device test** (user runs): install `packetviper-android/app/build/outputs/apk/debug/app-debug.apk`,
+   paste the `o` connect link, tap "Save & start alerts", lock the phone, trigger a High/Critical alarm.
+   Then M2 (standalone; needs NDK + cargo-ndk) — see `docs/ANDROID_PLAN.md`.
 3. Optional: relay behind Caddy for real HTTPS; wire a Threats-tab `T` key to add a source to `trusted`.
 
 ## Gotchas / environment

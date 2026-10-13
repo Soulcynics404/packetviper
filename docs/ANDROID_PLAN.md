@@ -22,7 +22,17 @@ service / push), plus saved pairing, a home-screen icon, and same-Wi-Fi auto-dis
 
 ## Milestones
 
-### M1 — Companion app (do first; the shared foundation)
+### M1 — Companion app — BUILT (awaiting on-device test)
+What shipped (`packetviper-android/`, AGP 8.5.2, Kotlin 1.9.24, Compose BOM 2024.06.00):
+- `MainActivity.kt`: paste the connect link (LAN `http://ip:7373/?t=…` or relay `https://host/r/<code>`),
+  "Save & start alerts" / "Stop", and a WebView of the laptop's dashboard (WebView-first decision).
+- `AlertService.kt`: `specialUse` foreground service; SSE reader thread with reconnect backoff (1s..30s,
+  15s read timeout); notifies (high-importance channel, sound + vibration) when `danger` turns on or
+  `danger_text` changes. `eventsUrl()` maps a link to its SSE URL (unit-tested).
+- Build: `./gradlew testDebugUnitTest assembleDebug` (needs network the first time; `local.properties` has `sdk.dir`).
+- Not done yet: QR scanning, restart on boot, battery-optimisation exemption prompt, APK hosting.
+
+Original plan:
 - New dir `packetviper-android/` (separate Gradle project; keep out of the Rust workspace).
 - Compose UI: a Settings/pair screen (save a dashboard URL + token, or scan the QR) and a main screen.
   Fastest first cut: a `WebView` of the existing `ui/dashboard.html` served by the laptop — reuses all UI.
