@@ -10,7 +10,8 @@ Read this first in a new session, with `PRODUCT.md` (what it is) and `TECHSTACK.
   token, phone control, relay (`packetviper-relay`) + HTTPS push, exfiltration alarm, trusted-devices
   list, smarter ARP, startup learning window.
 - Phases 1 and 2 are complete. **Phase 3 = native Android app: M1 (companion) built** in `packetviper-android/`
-  (`./gradlew testDebugUnitTest assembleDebug` green, 3 tests). Not yet tested on a real phone. M2/M3 not started.
+  (`./gradlew testDebugUnitTest assembleDebug` green, 3 tests) + QR scan pairing. On the user's phone (14 Oct 2026):
+  installs and shows the LAN dashboard (needed a ufw allow for 7373, see README). Danger-notification test still pending. M2/M3 not started.
 
 ## Hard rules (do not violate)
 - **No AI/assistant attribution** anywhere: not in commit messages, PR descriptions, README, code
