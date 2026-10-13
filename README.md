@@ -291,6 +291,13 @@ PacketViper serves a mobile dashboard so your phone sees live status and gets da
 - **Same Wi-Fi (built in):** press `o` in the TUI (or read the `serve` output) for a QR + link. Open it on your phone — big SAFE/DANGER banner that flashes, beeps and vibrates, live speed, top uploading apps, alerts, and (optionally) controls to toggle autosave/auto-defence and the ring size. Access is gated by a per-run token in the link.
 - **Anywhere (optional relay):** run the tiny `packetviper-relay` on a server (an **AWS free-tier `t2.micro`/`t3.micro` is plenty**) so alerts reach your phone on mobile data too.
 
+> **Phone shows `ERR_CONNECTION_TIMED_OUT`?** The laptop's firewall is dropping the dashboard port. Allow it from your home network only (adjust the subnet to yours):
+> ```bash
+> sudo ufw allow from 192.168.1.0/24 to any port 7373 proto tcp     # ufw (Ubuntu, Kali, Debian)
+> sudo firewall-cmd --add-port=7373/tcp                            # firewalld (Fedora); add --permanent to keep it
+> ```
+> On Windows, allow `packetviper.exe` when the firewall prompt appears, or add an inbound rule for TCP 7373 (Private profile). Also check PacketViper is running and the phone is on the same Wi-Fi. The relay needs no firewall change, because the laptop connects out to it.
+
 ### Deploy the relay (AWS free tier)
 
 ```bash
